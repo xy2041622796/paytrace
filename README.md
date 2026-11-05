@@ -99,6 +99,15 @@ npm run build    # vite build → dist/
 
 CI（`.github/workflows/ci.yml`）在 Node 20 下依次执行 `npm ci` → `npm run verify` → `npm run lint` → `npm run build`。
 
+## 动效与可访问性
+
+- 纯 CSS `transform` / `opacity` + Vue `<transition>`，**零新增依赖**；关键帧不动画任何布局属性。
+- 页面 / 卡片入场、登录↔主界面过渡、日历格子按 `--i` 交错浮现、ECharts 折线逐点绘出、骨架屏 shimmer 改用 transform、导航激活指示与按压 / 焦点反馈。
+- 入场动画一律用 `animation-fill-mode: backwards`，动画结束后不锁死 `transform`，hover / active 反馈仍然生效。
+- 系统开启「减弱动态效果」时，动画时长、**延迟**与循环次数一并清零（旧版只清了 duration，交错动画仍会等待）。
+- **金额不做数字滚动**：动画只负责进出场，任何时刻屏幕上的数字都是真实值，不会出现「中间金额」误导。
+- 以上约束由 `frontend/verify.mjs` 的「动效系统」一节静态锁死。
+
 ## 仍需用户本人在 Supabase / agnes 控制台完成的事项
 
 > 以下操作需要账号权限或密钥，Agent 无法代执行；代码侧已全部就绪。

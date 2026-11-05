@@ -582,3 +582,18 @@ CDP 375px 用 fetch 拦截模拟「午饭45，打车23」：解析出 **2 张草
 - `verify.mjs` 新增 RLS 静态校验：逐表断言 9 张用户表启用 RLS 且策略限定 `auth.uid()=user_id`，两张全局表只读（RK-05 的静态部分；动态越权测试仍需真实账号）。
 - 诚实标注未完成项：「账户注销并删除数据」仍只有说明入口（真正删除需 service_role / Edge Function）；`holiday_calendar` 表未接线、2027 节假日数据待补全；RLS 跨用户越权测试需真实账号，归入 §19.7 #1。
 
+---
+
+## 20. 2026-11-05 第十二轮：动效系统（零新增依赖）
+
+- **技术选型**：纯 CSS `transform` / `opacity` + Vue `<transition>`，不引入 Framer Motion / GSAP / Lottie（Vue 项目且要保持零依赖）。全局 token 写在 `src/styles/theme.css`：`--dur-fast/base/slow`、`--ease-out/in-out`。
+- **页面层**：`App.vue` 用 `<transition name="auth-page" mode="out-in">` 处理登录 ↔ 主界面，**刻意不加 `:key`**，避免子路由切换重建 AppLayout；主界面内子页面切换由全局 `main.content > *` 的 `page-in` 入场覆盖（兼容 Dashboard 的多根节点模板）。
+- **卡片 / 日历**：`.card` 统一 `rise-in`；`Calendar.vue` 给格子与当日明细加 `--i`，按 10ms / 45ms 交错浮现；`Login.vue` 登录卡片 `pop-in`、品牌点短脉冲（仅 3 次）。
+- **图表**：`CashflowTimeline.vue` 顶层配置 `animationDuration: 520` / `animationEasing: 'cubicOut'` / `animationDurationUpdate: 320`，每条线 `animationDelay: idx * 8` 从左到右绘出；只影响绘制过程，数值与数据点不变。
+- **骨架屏**：shimmer 从动画 `background-position`（持续重绘）改为伪元素 `transform: translateX()`，符合只动画 GPU 属性的约束。
+- **交互**：侧边栏激活指示条用 `::before` + `scaleY`（不动画宽度 / 位置）、移动端导航激活小圆点用 `scale`、自定义按钮 `scale(.97)` 按压与 `:focus-visible` 焦点环、主题切换表面过渡、刷新时的旋转指示。
+- **两条红线**：① 所有入场动画用 `animation-fill-mode: backwards`，结束后不锁死 transform，hover / active 仍生效；② `prefers-reduced-motion` 除 duration 外，把 `animation-delay`、`transition-delay`、`animation-iteration-count` 一并清零——旧版只清 duration，交错动画在系统减弱动效下仍会等待。
+- **金额严格性**：明确不做数字滚动 / 逐帧计数，动画只负责进出场，任何时刻显示都是真实值。
+- **验证**：`npm run lint` 0 阻断、`npm run verify` **90/90**（新增「动效系统」7 项：关键帧不含布局属性、减弱动效清零、backwards 保护 hover、transition 不加 key、shimmer 无 background-position、图表动效、无数字滚动）、`npm run build` 通过；另核对构建产物中 scoped 关键帧被 Vue 重写后定义与引用一致（`cal-cell-in-68860380`）。
+- git 提交：`f88a10c`（动效）、文档同步另计。可用 `npm run dev -- --port 5178` 本地预览。
+
