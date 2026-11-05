@@ -817,5 +817,33 @@ check('所有页面共用统一推演入口，不各自组装口径', () => {
   }
 })
 
+check('RLS 静态校验：9 张用户表启用行级安全且策略限定本人', () => {
+  const sql = readFileSync('../supabase/migrations/0001_init.sql', 'utf8')
+  const tables = [
+    'profiles', 'salary_config', 'expense_category', 'liability',
+    'repayment_event', 'transaction', 'pending_income', 'todo', 'ai_interaction_log'
+  ]
+  for (const t of tables) {
+    assert.match(
+      sql, new RegExp(`alter table public\\.${t}\\s+enable row level security`),
+      `${t} 未启用 RLS`
+    )
+    assert.match(
+      sql, new RegExp(`on public\\.${t}\\s+for all using \\(auth\\.uid\\(\\)=user_id\\)`),
+      `${t} 缺少 auth.uid()=user_id 策略`
+    )
+  }
+  assert.match(sql, /on public\.insurance_rule\s+for select/)
+  assert.match(sql, /on public\.holiday_calendar\s+for select/)
+})
+
+check('还款到期提醒覆盖逾期 / 当天 / 3 天内，且排除已还', () => {
+  const src = readFileSync('src/views/Dashboard.vue', 'utf8')
+  assert.match(src, /repayReminders/)
+  assert.match(src, /status !== 'paid'/)
+  assert.match(src, /days <= 3/)
+  assert.match(src, /todayISO\(\)/)
+})
+
 console.log(`\n结果：通过 ${passed} 项，失败 ${failed} 项\n`)
 if (failed > 0) process.exitCode = 1

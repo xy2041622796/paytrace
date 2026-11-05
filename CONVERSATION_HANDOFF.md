@@ -554,11 +554,11 @@ CDP 375px 用 fetch 拦截模拟「午饭45，打车23」：解析出 **2 张草
 
 ### 19.5 风险扫描与回归断言
 - 风险扫描在原有事件聚合之外，新增「还款冲突」「长期分期负担」两类。
-- `frontend/verify.mjs` 回归断言由 **63 项增至 81 项**，新增「日历数据严格性」9 项（表头对齐、节假日逐条等于国务院通知、按日均摊守恒、跨月一致性、跨页入口）与「社保规则与金额严格性」9 项（读表后 666.61 / 4333.39 / 公司成本 1338.64 逐条等于基准、改规则金额随之变、空表回落不漂移、档案页与仪表盘同口径、两类新风险、默认不打码）。
+- `frontend/verify.mjs` 回归断言由 **63 项增至 83 项**，新增「日历数据严格性」9 项（表头对齐、节假日逐条等于国务院通知、按日均摊守恒、跨月一致性、跨页入口）与「社保规则与金额严格性」9 项（读表后 666.61 / 4333.39 / 公司成本 1338.64 逐条等于基准、改规则金额随之变、空表回落不漂移、档案页与仪表盘同口径、两类新风险、默认不打码），另加「RLS 静态校验」与「还款到期提醒」2 项。
 - 2026 节假日静态表已对照国务院办公厅《关于 2026 年部分节假日安排的通知》逐条核验；2027 数据待补全（RK-06）。
 
 ### 19.6 本轮工程配置 / 文档 / 合规展示层
-- 顶层 `README.md`（原 0 字节）补成完整项目说明；`frontend/README.md` 更新到 8 页面 / 别名登录 / 累计预扣 / 81 项断言 / 按需引入等真实现状。
+- 顶层 `README.md`（原 0 字节）补成完整项目说明；`frontend/README.md` 更新到 8 页面 / 别名登录 / 累计预扣 / 83 项断言 / 按需引入等真实现状。
 - 新增 `.gitignore`、`.github/workflows/ci.yml`（Node 20：npm ci → verify → lint → build）、零依赖 `frontend/lint.mjs`（package.json 加 `lint` 脚本，未动 package-lock）。
 - 新增 `src/lib/privacy.js` 金额打码偏好；`labels.js` 的 `formatMoney` 脱敏开启返回 `••••`，默认关闭、Node 下自动回退，不影响断言。
 - `AppLayout.vue` 加「金额打码」开关（派发 `paytrace:pref-changed`）、「导出全部数据」跳转数据体检页、「注销账户」仅诚实说明入口（不假装删除）。
@@ -576,7 +576,9 @@ CDP 375px 用 fetch 拦截模拟「午饭45，打车23」：解析出 **2 张草
 ### 19.8 主 Agent 统一复核与收口（2026-11-05 晚）
 - 复核发现并修掉「档案配置页到手预览仍用兜底比例」：`Settings.vue` 的 `netNow / netPreview / historyNet` 全部注入 `effectiveRates`，与仪表盘 `buildProjection` 用同一套规则；`rulesSource` 改按 `matched > 0` 判断，避免「表里有行但城市不匹配」时文案误报「来自规则表」。这是本轮最容易再次造成「两页算出两个数」的隐患。
 - `supabase/functions/agnes-proxy/index.ts` 的购物劝导系统提示词补齐前端实际传入的英文字段说明（`currentBalance` / `monthMinBalance` / `monthEndBalance` / `negativeFromDay` / `monthlyNetSalary` / `upcomingRepayments` / `topRisks` / `safetyLine`），避免模型猜错字段；**需重新部署才生效**（见 §19.7 #3）。
-- 统一复核结果：`npm run lint` 通过（扫描 33 个文件 / 99 条相对 import / 0 阻断）、`npm run verify` **81/81**、`npm run build` 通过。
+- 统一复核结果：`npm run lint` 通过（扫描 33 个文件 / 99 条相对 import / 0 阻断）、`npm run verify` **83/83**、`npm run build` 通过。
 - 初始化 git 仓库并完成首次提交；`.env` / `node_modules` / `dist` 均由 `.gitignore` 排除，未入库。临时校验产物 `dist-check-*` 与一次性审计脚本已清理。
+- 补上 PRD FR-06 的「到期前 3 天 / 1 天站内提醒」：`Dashboard.vue` 新增还款提醒条，按 GMT+8 自然日差区分「今天 / 还有 N 天 / 已逾期 N 天」，排除已标记已还，逾期升级为红色告警；配套静态断言锁死。
+- `verify.mjs` 新增 RLS 静态校验：逐表断言 9 张用户表启用 RLS 且策略限定 `auth.uid()=user_id`，两张全局表只读（RK-05 的静态部分；动态越权测试仍需真实账号）。
 - 诚实标注未完成项：「账户注销并删除数据」仍只有说明入口（真正删除需 service_role / Edge Function）；`holiday_calendar` 表未接线、2027 节假日数据待补全；RLS 跨用户越权测试需真实账号，归入 §19.7 #1。
 

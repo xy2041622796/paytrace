@@ -48,7 +48,7 @@ frontend/
 ├─ package.json / package-lock.json
 ├─ vite.config.js          # manualChunks：charts / ui / supabase / vendor
 ├─ .env.example            # 复制为 .env 填入 Supabase 值
-├─ verify.mjs              # 81 项回归断言（esbuild + data URL 导入，无需临时文件）
+├─ verify.mjs              # 83 项回归断言（esbuild + data URL 导入，无需临时文件）
 ├─ lint.mjs                # 零依赖静态检查
 └─ src/
    ├─ main.js              # createApp + createPinia + 按需注册 Naive UI + 启动初始化 auth
@@ -83,7 +83,7 @@ VITE_SUPABASE_ANON_KEY=xxxx-anon-key
 ## 验证与产物
 
 ```bash
-npm run verify   # 81 项回归断言（社保 / 个税 / 按日均摊守恒 / 跨月一致性 / 校验层 / 组件注册）
+npm run verify   # 83 项回归断言（社保 / 个税 / 按日均摊守恒 / 跨月一致性 / 校验层 / 组件注册）
 npm run lint     # 零依赖静态检查（console.log / tab 属性 / weekOrder / 相对 import）
 npm run build    # vite build → dist/
 ```

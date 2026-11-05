@@ -16,6 +16,24 @@
       还没有薪资档案，下方数字仅为占位推演。请先到「档案配置」填写税前月薪与社保基数。
     </n-alert>
 
+    <!-- 还款到期提醒：提前 3 天 / 1 天 / 当天 / 逾期 -->
+    <n-alert
+      v-if="repayReminders.length"
+      :type="repayReminders.some((r) => r.days < 0) ? 'error' : 'warning'"
+      :bordered="false"
+      class="repay-alert"
+    >
+      <template #header>还款提醒（{{ repayReminders.length }} 笔）</template>
+      <div v-for="r in repayReminders" :key="r.id" class="remind-row">
+        <b :class="{ 'text-danger': r.days < 0 }">
+          {{ r.days < 0 ? `已逾期 ${-r.days} 天` : r.days === 0 ? '今天到期' : `还有 ${r.days} 天` }}
+        </b>
+        <span> · {{ r.due_date }} · {{ formatMoney(r.amount) }}</span>
+        <span v-if="r.status === 'overdue'" class="text-danger"> · 已标记逾期</span>
+      </div>
+      <div class="muted">到期前 3 天、1 天与当天在此提醒；还完请到「档案配置 → 还款日历」标记已还。</div>
+    </n-alert>
+
     <!-- 核心：期初余额（推演基准，常驻） -->
     <div class="card core-config">
       <div class="field-label">期初余额（元）· 仪表盘与月度对账共用同一个值</div>
@@ -222,6 +240,7 @@ import {
   readExpenseSpreadMode
 } from '../lib/prefs'
 import { round2 } from '../lib/validation'
+import { todayISO } from '../lib/date'
 
 const message = useMessage()
 const auth = useAuthStore()
@@ -271,6 +290,20 @@ const projection = computed(() => {
   })
 })
 const cf = computed(() => projection.value.cf)
+
+// 站内还款提醒：未标记已还、且距到期 ≤3 天（含当天与逾期）的账单
+// 用今天(GMT+8)与账单日的自然日差，避免时间戳时区把日期算错一天
+const repayReminders = computed(() => {
+  const base = new Date(`${todayISO()}T00:00:00`).getTime()
+  return (app.repayments || [])
+    .filter((r) => r.status !== 'paid' && r.due_date)
+    .map((r) => ({
+      ...r,
+      days: Math.round((new Date(`${r.due_date}T00:00:00`).getTime() - base) / 86400000)
+    }))
+    .filter((r) => Number.isFinite(r.days) && r.days <= 3)
+    .sort((a, b) => a.days - b.days)
+})
 const forecast = computed(() => projection.value.forecast)
 const netNow = computed(() => projection.value.netNow)
 const ytdCount = computed(() => projection.value.ytdCount)
@@ -360,6 +393,8 @@ onBeforeUnmount(() => {
 .cache-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 .cache-bar .muted { font-size: 12px; }
 .empty-alert { margin: 14px 0; }
+.repay-alert { margin: 14px 0; }
+.remind-row { font-size: 13px; line-height: 1.9; }
 .core-config { margin: 14px 0; }
 .config-row { display: flex; gap: 24px; margin: 6px 0; flex-wrap: wrap; align-items: flex-end; }
 .cfg-item { display: flex; flex-direction: column; gap: 6px; }
