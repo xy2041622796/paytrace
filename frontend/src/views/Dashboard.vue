@@ -9,6 +9,7 @@
     </p>
     <div class="cache-bar">
       <span class="muted">档案更新于 {{ cacheTime }}（本地缓存 12 小时）</span>
+      <span v-if="refreshing" class="refresh-dot is-spinning" aria-hidden="true" />
       <n-button size="tiny" quaternary :loading="refreshing" @click="forceRefresh">强制刷新</n-button>
     </div>
 
@@ -393,8 +394,21 @@ onBeforeUnmount(() => {
 .cache-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 .cache-bar .muted { font-size: 12px; }
 .empty-alert { margin: 14px 0; }
-.repay-alert { margin: 14px 0; }
+.repay-alert {
+  margin: 14px 0;
+  animation: dash-alert-in var(--dur-base) var(--ease-out) backwards;
+}
 .remind-row { font-size: 13px; line-height: 1.9; }
+.refresh-dot {
+  width: 9px; height: 9px; flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid var(--c-primary-soft);
+  border-top-color: var(--c-primary);
+}
+@keyframes dash-alert-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 .core-config { margin: 14px 0; }
 .config-row { display: flex; gap: 24px; margin: 6px 0; flex-wrap: wrap; align-items: flex-end; }
 .cfg-item { display: flex; flex-direction: column; gap: 6px; }

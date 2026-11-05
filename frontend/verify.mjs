@@ -845,5 +845,68 @@ check('还款到期提醒覆盖逾期 / 当天 / 3 天内，且排除已还', ()
   assert.match(src, /todayISO\(\)/)
 })
 
+// ============================================================
+// 动效系统：只动 GPU 属性、尊重减弱动效、绝不产生「中间金额」
+// ============================================================
+console.log('\n【动效系统】')
+const css = readFileSync('src/styles/theme.css', 'utf8')
+
+check('动效 token 与关键帧齐备，关键帧内不动画任何布局属性', () => {
+  for (const v of ['--dur-fast', '--dur-base', '--dur-slow', '--ease-out', '--ease-in-out']) {
+    assert.ok(css.includes(v), `缺少 ${v}`)
+  }
+  const blocks = [...css.matchAll(/@keyframes\s+[\w-]+\s*\{([\s\S]*?)\n\}/g)].map((m) => m[1])
+  assert.ok(blocks.length >= 6, `关键帧数量不足：${blocks.length}`)
+  for (const b of blocks) {
+    assert.doesNotMatch(
+      b, /\b(width|height|top|left|right|bottom|margin|padding|background-position)\s*:/,
+      '关键帧里出现了布局属性，会造成重排'
+    )
+  }
+})
+
+check('减弱动效：delay 与循环一并清零，交错动画不会残留等待', () => {
+  const rm = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+  assert.ok(rm.length > 0)
+  assert.match(rm, /animation-delay:\s*0ms\s*!important/)
+  assert.match(rm, /transition-delay:\s*0ms\s*!important/)
+  assert.match(rm, /animation-iteration-count:\s*1\s*!important/)
+  assert.match(rm, /animation-duration:\s*\.01ms\s*!important/)
+})
+
+check('入场动画用 backwards，不锁死 transform（hover / active 仍生效）', () => {
+  assert.doesNotMatch(css, /animation:\s*(?:rise-in|page-in)[^;]*\bboth\b/)
+  const cal = readFileSync('src/views/Calendar.vue', 'utf8')
+  assert.match(cal, /cal-cell-in 320ms var\(--ease-out\) backwards/)
+  assert.match(cal, /--i/, '日历格子应支持交错入场')
+})
+
+check('登录↔主界面用 transition 且不加 :key，子路由切换不重建布局', () => {
+  const app = readFileSync('src/App.vue', 'utf8')
+  assert.match(app, /<transition name="auth-page" mode="out-in">/)
+  assert.match(app, /<component :is="Component" \/>/)
+  assert.doesNotMatch(app, /:key="route/)
+})
+
+check('骨架屏 shimmer 用 transform 位移，不动画 background-position', () => {
+  const app = readFileSync('src/App.vue', 'utf8')
+  // 只匹配真实声明（带冒号），注释里提到该属性名不算
+  assert.doesNotMatch(app, /background-position\s*:/)
+  assert.match(app, /@keyframes boot-sweep/)
+})
+
+check('图表动效只作用于绘制过程，数值与数据点不变', () => {
+  const t = readFileSync('src/components/CashflowTimeline.vue', 'utf8')
+  assert.match(t, /animationDuration:\s*520/)
+  assert.match(t, /animationEasing:\s*'cubicOut'/)
+  assert.match(t, /animationDelay:\s*\(idx\)/)
+})
+
+check('金额不做数字滚动：不存在逐帧计数 / 定时器驱动的数字动画', () => {
+  const views = ['Dashboard.vue', 'Ledger.vue', 'Calendar.vue', 'Settings.vue']
+    .map((f) => readFileSync(`src/views/${f}`, 'utf8')).join('\n')
+  assert.doesNotMatch(views, /requestAnimationFrame|countUp|setInterval|setTimeout\(.*formatMoney/)
+})
+
 console.log(`\n结果：通过 ${passed} 项，失败 ${failed} 项\n`)
 if (failed > 0) process.exitCode = 1

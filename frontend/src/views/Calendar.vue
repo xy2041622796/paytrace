@@ -43,6 +43,7 @@
           :key="i"
           class="cal-cell"
           :class="cellClass(cell)"
+          :style="{ '--i': i }"
           @click="cell && selectDay(cell.day)"
         >
           <template v-if="cell">
@@ -72,7 +73,13 @@
           <span class="muted">{{ dayBalanceText }}</span>
         </div>
         <div v-if="selectedEvents.length" class="dd-list">
-          <div v-for="(e, i) in selectedEvents" :key="i" class="dd-item" :class="'ev-' + e.type">
+          <div
+            v-for="(e, i) in selectedEvents"
+            :key="i"
+            class="dd-item"
+            :class="'ev-' + e.type"
+            :style="{ '--i': i }"
+          >
             <span class="dd-tag">{{ evLabel[e.type] || '其他' }}</span>
             <span class="dd-name">{{ e.label }}</span>
             <b class="dd-amt" :class="e.amount >= 0 ? 'text-success' : 'text-danger'">
@@ -283,6 +290,15 @@ onUnmounted(() => {
 .cal-weekname { text-align: center; font-size: 12px; color: var(--c-text-3); padding: 4px 0; }
 .cal-cell { min-height: 64px; }
 .cal-blank { min-height: 0; }
+/* 切月时格子按 --i 依次浮现；backwards 保证 hover 位移不被动画终态锁死 */
+.cal-grid .cal-cell {
+  animation: cal-cell-in 320ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 10ms);
+}
+@keyframes cal-cell-in {
+  from { opacity: 0; transform: translateY(6px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
 .cal-day {
   border: 1px solid var(--c-border);
   border-radius: 8px;
@@ -292,7 +308,10 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 3px;
   background: var(--c-surface);
-  transition: transform .12s ease, border-color .12s ease;
+  transition: transform var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) ease,
+              box-shadow var(--dur-fast) ease,
+              background-color var(--dur-base) ease;
 }
 .cal-day:hover { transform: translateY(-2px); border-color: var(--c-primary); }
 .cal-daynum { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
@@ -315,7 +334,15 @@ onUnmounted(() => {
 .day-detail { margin-top: 16px; }
 .dd-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .dd-list { display: flex; flex-direction: column; gap: 8px; }
-.dd-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.dd-item {
+  display: flex; align-items: center; gap: 10px; font-size: 13px;
+  animation: cal-item-in var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+@keyframes cal-item-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
 .dd-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; color: var(--c-text-2); background: var(--c-hover); flex-shrink: 0; }
 .ev-pay .dd-tag { color: var(--c-success); background: rgba(16,185,129,.12); }
 .ev-repay .dd-tag { color: var(--c-danger); background: rgba(239,68,68,.12); }

@@ -155,15 +155,28 @@ onBeforeUnmount(() => {
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c-primary); flex-shrink: 0; }
 .nav { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .nav-item {
+  position: relative;
   text-decoration: none;
   color: var(--c-text-2);
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   font-size: 14px;
-  transition: background .15s, color .15s;
+  transition: background .15s, color .15s, transform var(--dur-fast) var(--ease-out);
 }
-.nav-item:hover { background: var(--c-hover); color: var(--c-text); }
+.nav-item:hover { background: var(--c-hover); color: var(--c-text); transform: translateX(2px); }
 .nav-active { background: var(--c-primary-soft); color: var(--c-primary); font-weight: 600; }
+/* 激活指示条：位置固定，只用 scaleY 做进出，不动画 width / left */
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 20%; bottom: 20%;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--c-primary);
+  transform: scaleY(0);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.nav-item.nav-active::before { transform: scaleY(1); }
 .sidebar-foot { border-top: 1px solid var(--c-border); padding-top: 14px; }
 .theme-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .theme-label { font-size: 12px; color: var(--c-text-2); }
@@ -193,6 +206,11 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
   padding: 10px;
   margin-bottom: 8px;
+  animation: side-reveal var(--dur-base) var(--ease-out) backwards;
+}
+@keyframes side-reveal {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .delete-info code { font-size: 11px; word-break: break-all; }
 .logout {
@@ -239,6 +257,7 @@ onBeforeUnmount(() => {
     z-index: 20;
   }
   .mobile-nav-item {
+    position: relative;
     flex: 1;
     display: flex;
     align-items: center;
@@ -246,7 +265,20 @@ onBeforeUnmount(() => {
     text-decoration: none;
     color: var(--c-text-2);
     font-size: 13px;
+    transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease;
   }
   .mobile-nav-item.nav-active { color: var(--c-primary); background: var(--c-primary-soft); font-weight: 600; }
+  /* 激活小圆点：只做 scale，不产生位移抖动 */
+  .mobile-nav-item::after {
+    content: '';
+    position: absolute;
+    bottom: 6px;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--c-primary);
+    transform: scale(0);
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+  .mobile-nav-item.nav-active::after { transform: scale(1); }
 }
 </style>

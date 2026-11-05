@@ -98,11 +98,31 @@ async function onSubmit() {
   background: var(--c-bg);
 }
 .theme-toggle { position: absolute; top: 16px; right: 20px; }
-.login-card { width: 100%; max-width: 360px; border: 1px solid var(--c-border); border-radius: var(--radius); }
+.login-card {
+  width: 100%; max-width: 360px;
+  border: 1px solid var(--c-border); border-radius: var(--radius);
+  animation: login-pop var(--dur-slow) var(--ease-out) backwards;
+}
 .brand { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c-primary); }
+.dot {
+  width: 10px; height: 10px; border-radius: 50%; background: var(--c-primary);
+  animation: login-dot 2.4s var(--ease-in-out) 3;
+}
 .sub { color: var(--c-text-2); font-size: 13px; margin: 8px 0 18px; }
 .switch { margin-top: 10px; }
-.err { color: var(--c-danger); font-size: 13px; margin-top: 12px; }
-.hint { color: var(--c-success); font-size: 13px; margin-top: 12px; }
+.err, .hint {
+  font-size: 13px; margin-top: 12px;
+  animation: login-fade var(--dur-base) var(--ease-out) backwards;
+}
+.err { color: var(--c-danger); }
+.hint { color: var(--c-success); }
+@keyframes login-pop {
+  from { opacity: 0; transform: scale(.97) translateY(10px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes login-dot { 50% { opacity: .55; transform: scale(.82); } }
+@keyframes login-fade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 </style>

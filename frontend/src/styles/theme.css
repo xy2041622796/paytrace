@@ -21,6 +21,13 @@
   --c-split: #F3F4F6;         /* 图表网格线 */
   --radius: 10px;
   --radius-sm: 8px;
+
+  /* 动效系统：只动画 transform / opacity，时长克制，不干扰金额阅读 */
+  --dur-fast: 140ms;
+  --dur-base: 240ms;
+  --dur-slow: 380ms;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-in-out: cubic-bezier(.4, 0, .2, 1);
 }
 
 [data-theme='dark'] {
@@ -67,6 +74,9 @@ body {
   border-radius: var(--radius);
   padding: 20px;
   transition: background-color .2s ease, border-color .2s ease;
+  /* backwards（非 both）：动画结束后不锁死 transform，保留 hover / active 反馈 */
+  animation: rise-in var(--dur-slow) var(--ease-out) backwards;
+  animation-delay: 60ms;
 }
 
 /* 橙色主按钮视觉（配合 Naive UI 主题覆盖） */
@@ -99,9 +109,84 @@ body {
   .card { padding: 14px; border-radius: 8px; }
 }
 
+/* ============================================================
+   动效系统 · 只动画 transform / opacity（GPU 友好）
+   金额一律不做数字滚动：屏幕上任何时刻显示的都是真实值，
+   动画只负责进出场与反馈，绝不产生「中间金额」误导用户。
+   ============================================================ */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes cell-in {
+  from { opacity: 0; transform: translateY(6px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .6; transform: scale(.88); }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 主界面内子页面切换：路由重建根元素时自然重播，兼容多根节点的视图 */
+main.content > * { animation: page-in var(--dur-slow) var(--ease-out) backwards; }
+
+/* 登录 ↔ 主界面的路由过渡（两个顶层视图均为单根） */
+.auth-page-enter-active,
+.auth-page-leave-active {
+  transition: opacity var(--dur-base) var(--ease-in-out), transform var(--dur-base) var(--ease-in-out);
+}
+.auth-page-enter-from { opacity: 0; transform: translateY(10px); }
+.auth-page-leave-to   { opacity: 0; transform: translateY(-6px); }
+
+/* 交错入场工具：给元素设 --i 即可，无需 JS 定时器 */
+.stagger-in {
+  animation: rise-in var(--dur-slow) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+/* 交互反馈：只作用于自定义控件，不覆盖 Naive UI 自带的按压样式 */
+.btn-primary, .logout, .side-link, .err-entry, .err-close {
+  transition: transform var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) ease,
+              border-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.btn-primary:active:not(:disabled), .logout:active, .side-link:active, .err-entry:active {
+  transform: scale(.97);
+}
+.btn-primary:focus-visible, .logout:focus-visible, .side-link:focus-visible,
+.nav-item:focus-visible, .mobile-nav-item:focus-visible, .err-entry:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+}
+
+/* 主题切换时表面平滑过渡，避免闪白 */
+.card, .sidebar, .mobile-top, .mobile-nav, .n-card {
+  transition: background-color var(--dur-base) ease, border-color var(--dur-base) ease;
+}
+
+/* 加载/刷新旋转指示：只作用于图标，不参与金额 */
+.is-spinning { animation: spin .9s linear infinite; display: inline-block; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;
+    animation-delay: 0ms !important;       /* 交错延迟必须一并清零，否则减弱动效仍会等待 */
+    animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
 }

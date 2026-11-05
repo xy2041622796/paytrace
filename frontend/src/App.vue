@@ -2,7 +2,12 @@
   <n-config-provider :theme="naiveTheme" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
     <n-message-provider>
       <n-dialog-provider>
-        <router-view />
+        <!-- 登录 ↔ 主界面切换；不设 key，子路由切换时复用 AppLayout 不重播整页 -->
+        <router-view v-slot="{ Component }">
+          <transition name="auth-page" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
       </n-dialog-provider>
     </n-message-provider>
 
@@ -123,24 +128,41 @@ onBeforeUnmount(() => {
   border: 1px solid var(--c-border);
   border-radius: 12px;
   background: var(--c-surface);
+  animation: boot-pop var(--dur-slow) var(--ease-out) both;
 }
 .boot-brand { font-size: 16px; font-weight: 600; margin-bottom: 18px; }
+/* shimmer 用伪元素 transform 位移，不动画 background-position（避免持续重绘） */
 .boot-line, .boot-block {
+  position: relative;
+  overflow: hidden;
   border-radius: 6px;
-  background: linear-gradient(90deg, var(--c-hover) 25%, var(--c-border) 37%, var(--c-hover) 63%);
-  background-size: 400% 100%;
-  animation: boot-shimmer 1.4s ease infinite;
+  background: var(--c-hover);
+}
+.boot-line::after, .boot-block::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--c-border), transparent);
+  transform: translateX(-100%);
+  animation: boot-sweep 1.4s var(--ease-in-out) infinite;
 }
 .boot-line { height: 12px; margin-bottom: 12px; }
 .boot-block { height: 96px; border-radius: 8px; margin: 8px 0 16px; }
 .w-60 { width: 60%; }
 .w-75 { width: 75%; }
 .w-90 { width: 90%; }
-.boot-tip { font-size: 13px; color: var(--c-text-2); text-align: center; }
-@keyframes boot-shimmer {
-  0% { background-position: 100% 50%; }
-  100% { background-position: 0 50%; }
+.boot-tip {
+  font-size: 13px;
+  color: var(--c-text-2);
+  text-align: center;
+  animation: boot-fade var(--dur-slow) linear both;
 }
+@keyframes boot-sweep { to { transform: translateX(100%); } }
+@keyframes boot-pop {
+  from { opacity: 0; transform: scale(.97) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes boot-fade { from { opacity: 0; } to { opacity: 1; } }
 
 .err-entry {
   position: fixed;
@@ -155,8 +177,14 @@ onBeforeUnmount(() => {
   color: var(--c-text-2);
   cursor: pointer;
 }
-.err-entry.has-error { color: var(--c-danger); border-color: var(--c-danger); }
+.err-entry.has-error {
+  color: var(--c-danger);
+  border-color: var(--c-danger);
+  animation: boot-alert 1.8s var(--ease-in-out) 2;
+}
+@keyframes boot-alert { 50% { transform: scale(1.06); } }
 .err-panel {
+  animation: boot-pop var(--dur-base) var(--ease-out) both;
   position: fixed;
   right: 14px;
   bottom: 112px;

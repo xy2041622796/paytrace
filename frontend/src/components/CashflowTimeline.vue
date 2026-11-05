@@ -78,6 +78,8 @@ function buildOption() {
       data: props.series[l],
       smooth: true,
       symbol: 'none',
+      // 折线从左到右逐点绘出；只影响绘制过程，数据点与数值不变
+      animationDelay: (idx) => idx * 8,
       lineStyle: { color: st.color, width: st.width, type: st.type },
       itemStyle: { color: st.color },
       areaStyle:
@@ -108,6 +110,11 @@ function buildOption() {
   const labelInterval = Math.max(1, Math.floor(props.dates.length / (mobile ? 5 : 10)))
 
   return {
+    animation: true,
+    animationDuration: 520,
+    animationEasing: 'cubicOut',
+    animationDurationUpdate: 320,
+    animationEasingUpdate: 'cubicOut',
     grid: { left: mobile ? 46 : 56, right: mobile ? 12 : 24, top: 38, bottom: 40 },
     legend: {
       data: labels,
