@@ -17,7 +17,8 @@ export const supabase = createClient(url ?? '', anonKey ?? '', {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true
+    // 纯密码登录 + hash 路由，无需从 URL 解析会话；关闭可缩小 token 经 URL/历史泄露面
+    detectSessionInUrl: false
   }
 })
 

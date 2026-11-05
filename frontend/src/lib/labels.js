@@ -109,3 +109,10 @@ export function formatMoney(value, withUnit = true) {
   const s = n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   return withUnit ? `${s} 元` : s
 }
+
+// 供返回 HTML 字符串的第三方渲染器（如 ECharts tooltip formatter）使用：
+// Vue 插值本身会自动转义，但拼进 HTML 的动态片段必须显式转义。
+const HTML_ESCAPE = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+export function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPE[c])
+}

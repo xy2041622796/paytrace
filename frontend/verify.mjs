@@ -521,11 +521,13 @@ check('AI 结果：中文方向映射为英文枚举，避免脏数据入库', (
   assert.equal(items[1].direction, 'expense')
 })
 
-check('草稿校验：非法日期 / 中文方向 / 0 金额 / 空分类被拒绝', () => {
+check('草稿校验：非法日期 / 中文方向 / 0 金额 / 分类与备注皆空被拒绝', () => {
   assert.equal(aid.validateDraft(mkDraft({ txn_date: '2026-02-30' })).ok, false)
   assert.equal(aid.validateDraft(mkDraft({ direction: '支出' })).ok, false)
   assert.equal(aid.validateDraft(mkDraft({ amount: 0 })).ok, false)
-  assert.equal(aid.validateDraft(mkDraft({ category: '' })).ok, false)
+  assert.equal(aid.validateDraft(mkDraft({ category: '', note: '' })).ok, false)
+  // 仅分类留空、备注可判类时自动归一，不再把用户卡在「分类不能为空」
+  assert.equal(aid.validateDraft(mkDraft({ category: '' })).value.category, '午餐')
 })
 
 check('草稿校验：合法条目保留来源并归一金额', () => {
@@ -906,6 +908,281 @@ check('金额不做数字滚动：不存在逐帧计数 / 定时器驱动的数�
   const views = ['Dashboard.vue', 'Ledger.vue', 'Calendar.vue', 'Settings.vue']
     .map((f) => readFileSync(`src/views/${f}`, 'utf8')).join('\n')
   assert.doesNotMatch(views, /requestAnimationFrame|countUp|setInterval|setTimeout\(.*formatMoney/)
+})
+
+console.log('\n【安全与隔离回归】')
+const prefsMod = await load('src/lib/prefs.js')
+
+function withFakeStorage(fn) {
+  const prev = globalThis.localStorage
+  const store = {
+    getItem(k) { return Object.prototype.hasOwnProperty.call(this, k) ? this[k] : null },
+    setItem(k, v) { this[k] = String(v) },
+    removeItem(k) { delete this[k] }
+  }
+  globalThis.localStorage = store
+  try {
+    return fn(store)
+  } finally {
+    if (prev === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = prev
+  }
+}
+
+check('偏好按账号隔离：切换账号读不到上一个人的期初余额与历史薪资', () => {
+  withFakeStorage(() => {
+    prefsMod.setPrefScope('user-a')
+    prefsMod.writePref('startBalance', 465)
+    prefsMod.writePref('salaryYtd', [{ month: 8, preTax: 4000 }])
+    assert.equal(prefsMod.readPref('startBalance', 0), 465)
+    prefsMod.setPrefScope('user-b')
+    assert.equal(prefsMod.readPref('startBalance', 0), 0)
+    assert.deepEqual(prefsMod.readPref('salaryYtd', []), [])
+    prefsMod.setPrefScope('user-a')
+    assert.equal(prefsMod.readPref('startBalance', 0), 465)
+    prefsMod.clearPrefs()
+    assert.equal(prefsMod.readPref('startBalance', 0), 0)
+  })
+})
+
+check('旧版全局偏好 key 一次性迁移到当前账号且不再共享', () => {
+  withFakeStorage((store) => {
+    store.setItem('paytrace:pref:cushionTarget', '2000')
+    prefsMod.setPrefScope('user-c')
+    assert.equal(prefsMod.readPref('cushionTarget', 0), 2000)
+    assert.equal(store.getItem('paytrace:pref:cushionTarget'), null)
+    assert.equal(store.getItem('paytrace:pref:user-c:cushionTarget'), '2000')
+  })
+})
+
+check('档案加载按账号隔离：inflight 绑定 uid，响应写入前复核', () => {
+  const src = readFileSync('src/stores/app.js', 'utf8')
+  assert.match(src, /inflight = \{ uid, promise \}/)
+  assert.match(src, /inflight\.uid === uid/)
+  assert.match(src, /useAuthStore\(\)\.userId !== uid\) return/)
+  assert.match(src, /this\._persist\(uid\)/)
+  const auth = readFileSync('src/stores/auth.js', 'utf8')
+  assert.match(auth, /setPrefScope\(/)
+  assert.match(auth, /clearPrefs\(\)/)
+})
+
+check('tooltip 动态片段统一 HTML 转义', () => {
+  const s = labels.escapeHtml('<img src=x onerror="alert(1)">&"\'')
+  assert.ok(!s.includes('<img'))
+  assert.match(s, /&lt;img/)
+  assert.match(s, /&amp;/)
+  assert.match(s, /&quot;/)
+  assert.match(s, /&#39;/)
+  assert.equal(labels.escapeHtml(null), '')
+  const t = readFileSync('src/components/CashflowTimeline.vue', 'utf8')
+  assert.match(t, /escapeHtml\(e\.label\)/)
+  assert.match(t, /escapeHtml\(s\.seriesName\)/)
+  assert.doesNotMatch(t, /\$\{e\.label\}/)
+})
+
+check('agnes-proxy：CORS 预检、输入限长、错误脱敏、超时与版本锁定', () => {
+  const fn = readFileSync('../supabase/functions/agnes-proxy/index.ts', 'utf8')
+  assert.match(fn, /req\.method === "OPTIONS"/)
+  assert.match(fn, /Access-Control-Allow-Origin/)
+  assert.match(fn, /AbortSignal\.timeout/)
+  assert.match(fn, /slice\(0, MAX_TEXT\)/)
+  assert.match(fn, /@supabase\/supabase-js@2\.43\.4/)
+  assert.doesNotMatch(fn, /detail: String\(e\)/)
+  assert.doesNotMatch(fn, /status: upstream\.status/)
+})
+
+check('打码状态走内存缓存，formatMoney 热路径不再同步读 localStorage', () => {
+  const privacy = readFileSync('src/lib/privacy.js', 'utf8')
+  assert.match(privacy, /let cache = null/)
+  assert.doesNotMatch(privacy, /localStorage\.getItem/)
+  const prev = globalThis.localStorage
+  let reads = 0
+  globalThis.localStorage = {
+    getItem(k) {
+      reads++
+      return Object.prototype.hasOwnProperty.call(this, k) ? this[k] : null
+    },
+    setItem(k, v) { this[k] = String(v) },
+    removeItem(k) { delete this[k] }
+  }
+  try {
+    labels.formatMoney(1)
+    const before = reads
+    for (let i = 0; i < 50; i++) labels.formatMoney(i)
+    assert.equal(reads, before)
+  } finally {
+    if (prev === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = prev
+  }
+})
+
+check('偏好写入防抖、卸载取消定时器、图表不再全量重绘', () => {
+  const dash = readFileSync('src/views/Dashboard.vue', 'utf8')
+  assert.match(dash, /debounced\(/)
+  assert.match(dash, /writers\.forEach\(\(w\) => w\.cancel\(\)\)/)
+  const t = readFileSync('src/components/CashflowTimeline.vue', 'utf8')
+  assert.match(t, /replaceMerge/)
+  assert.doesNotMatch(t, /deep:\s*true/)
+})
+
+check('日历切月有上界、账本切月丢弃过期响应', () => {
+  const cal = readFileSync('src/views/Calendar.vue', 'utf8')
+  assert.match(cal, /MAX_MONTH_OFFSET = 24/)
+  assert.match(cal, /monthOffset\(\) <= -MAX_MONTH_OFFSET/)
+  assert.match(cal, /monthOffset\(\) >= MAX_MONTH_OFFSET/)
+  const ledger = readFileSync('src/views/Ledger.vue', 'utf8')
+  assert.match(ledger, /if \(seq !== loadSeq\) return/)
+})
+
+check('会话不解析 URL、登录跳转只接受站内路径', () => {
+  const sb = readFileSync('src/lib/supabase.js', 'utf8')
+  assert.match(sb, /detectSessionInUrl: false/)
+  const login = readFileSync('src/views/Login.vue', 'utf8')
+  assert.ok(login.includes("!raw.startsWith('//')"))
+})
+
+console.log('\n【智能分类】')
+
+check('关键词规则覆盖更细的生活场景', () => {
+  assert.equal(aid.inferCategory('昨天中午快餐45'), '餐饮')
+  assert.equal(aid.inferCategory('打车23'), '打车')
+  assert.equal(aid.inferCategory('话费充值100'), '话费')
+  assert.equal(aid.inferCategory('晚上买水3块'), '饮品')
+  assert.equal(aid.inferCategory('买药38'), '药品')
+  assert.equal(aid.inferCategory('电影票45'), '娱乐')
+  assert.equal(aid.inferCategory('淘宝买鞋299'), '服饰')
+  assert.equal(aid.inferCategory('交房租1500'), '房租')
+  assert.equal(aid.inferCategory('孩子学费2000'), '教育')
+  assert.equal(aid.inferCategory('视频会员续费25'), '订阅')
+  assert.equal(aid.inferCategory('朋友结婚随礼500'), '人情')
+  assert.equal(aid.inferCategory('不知道花了啥'), '')
+  assert.equal(aid.inferCategory(''), '')
+  assert.ok(aid.CATEGORY_OPTIONS.length >= 20, '默认分类不应再局限 8 类')
+})
+
+check('分类归一化：清单直用、模型别名归一、用户手填保留、空值兜底', () => {
+  assert.equal(aid.normalizeCategory('餐饮', ''), '餐饮')
+  assert.equal(aid.normalizeCategory('午饭', ''), '午饭', '用户手填的分类不被规则改写')
+  assert.equal(aid.normalizeCategory('午饭', '', { fromModel: true }), '午餐')
+  assert.equal(aid.normalizeCategory('交通费', '', { fromModel: true }), '通勤')
+  assert.equal(aid.normalizeCategory('', '中午吃了快餐'), '餐饮')
+  assert.equal(aid.normalizeCategory('', '不知道'), '其他')
+  assert.equal(aid.normalizeCategory('孩子学费', '', { categories: ['孩子学费'] }), '孩子学费')
+})
+
+check('AI 草稿自动归一分类，且一句话多笔按各自备注判类', () => {
+  const res = { result: [
+    { date: '2026-11-05', direction: '支出', category: '午饭', amount: 45, note: '中午快餐' },
+    { date: '2026-11-05', direction: '支出', category: '', amount: 23, note: '打车回家' }
+  ] }
+  const items = aid.normalizeAiResult(res, '昨天中午快餐45，打车23')
+  assert.equal(items.length, 2)
+  assert.equal(items[0].category, '午餐')
+  assert.equal(items[1].category, '打车')
+  assert.equal(items[0].originalCategory, '午饭')
+  assert.ok(aid.validateDraft(items[0]).ok)
+})
+
+check('手动记账与草稿留空分类自动兜底，不会被校验层卡住', () => {
+  const blank = aid.makeBlankDraft()
+  blank.amount = 45
+  blank.note = '午饭'
+  assert.equal(aid.validateDraft(blank).value.category, '午餐')
+  const ledger = readFileSync('src/views/Ledger.vue', 'utf8')
+  assert.match(ledger, /normalizeCategory\(form\.category, form\.note, habitOptions\(\)\)/)
+  assert.match(ledger, /inferCategory\(v, habitOptions\(\)\)/)
+  assert.match(ledger, /learnFromRows\(/)
+  const ai = readFileSync('src/views/AINote.vue', 'utf8')
+  assert.match(ai, /normalizeAiResult\(res, noteText\.value, habitOptions\(\)\)/)
+  assert.match(ai, /categories: habitCategories\(\)/)
+  assert.match(ai, /recordAlias\(/)
+})
+
+console.log('\n【分类习惯】')
+const hab = await load('src/lib/categoryHabits.js')
+
+check('记住用过的分类：计数、自定义收录、按频次排在前面', () => {
+  withFakeStorage(() => {
+    hab.clearHabits()
+    hab.recordUsage('工作餐')
+    hab.recordUsage('工作餐')
+    hab.recordUsage('打车')
+    hab.learnFromRows([{ category: '孩子学费' }, { category: '孩子学费' }])
+    const h = hab.getHabits()
+    assert.ok(Number(h.counts['工作餐']) >= 2)
+    assert.ok(h.custom.includes('工作餐'))
+    assert.ok(h.custom.includes('孩子学费'))
+    const cats = hab.habitCategories()
+    assert.equal(cats[0], '工作餐', '用得最多的分类应排最前')
+    assert.ok(cats.includes('孩子学费'))
+    assert.ok(cats.includes('餐饮'), '默认清单仍应补齐')
+    hab.clearHabits()
+  })
+})
+
+check('记住改过的说法：别名优先于默认规则', () => {
+  withFakeStorage(() => {
+    hab.clearHabits()
+    hab.recordAlias('午饭', '工作餐')
+    assert.equal(hab.habitOptions().aliases['午饭'], '工作餐')
+    const opts = hab.habitOptions()
+    assert.equal(aid.inferCategory('午饭45', opts), '工作餐')
+    assert.equal(aid.normalizeCategory('', '午饭', opts), '工作餐')
+    const items = aid.normalizeAiResult(
+      { result: [{ date: '2026-11-05', direction: '支出', category: '午饭', amount: 45, note: '午饭' }] },
+      '', opts
+    )
+    assert.equal(items[0].category, '工作餐')
+    assert.equal(items[0].originalCategory, '午饭')
+    hab.clearHabits()
+  })
+})
+
+check('习惯按账号隔离且退出不清（key 带 uid，独立于 prefs 命名空间）', () => {
+  const src = readFileSync('src/lib/categoryHabits.js', 'utf8')
+  assert.match(src, /getPrefScope\(\)/)
+  assert.match(src, /paytrace:habits:/)
+  assert.doesNotMatch(src, /readPref\(|writePref\(/)
+  assert.match(src, /退出登录不清除/)
+})
+
+check('Edge Function 不再写死枚举，改为接收并清洗常用分类清单', () => {
+  const fn = readFileSync('../supabase/functions/agnes-proxy/index.ts', 'utf8')
+  assert.ok(!fn.includes('category":"餐饮|话费|通勤'))
+  assert.ok(fn.includes('用户常用分类'))
+  assert.ok(fn.includes('body.categories'))
+  assert.ok(fn.includes('slice(0, 40)'))
+  assert.ok(fn.includes('.replace(/['))
+})
+
+check('用户自己填的分类不被备注里的关键词覆盖', () => {
+  assert.equal(aid.normalizeCategory('工作餐', '午饭', {}), '工作餐')
+  assert.equal(aid.normalizeCategory('孩子学费', '午饭时交的学费', {}), '孩子学费')
+  // 用户手填保留；模型给的值才归一；分类为空才用备注推断
+  assert.equal(aid.normalizeCategory('午饭', '', {}), '午饭')
+  assert.equal(aid.normalizeCategory('午饭', '', { fromModel: true }), '午餐')
+  assert.equal(aid.normalizeCategory('', '打车回家', {}), '打车')
+  const draft = aid.makeBlankDraft()
+  draft.amount = 45
+  draft.note = '午饭'
+  draft.category = '工作餐'
+  assert.equal(aid.validateDraft(draft).value.category, '工作餐')
+})
+
+check('习惯学习链路：改过的分类能保留并正确记为别名', () => {
+  withFakeStorage(() => {
+    hab.clearHabits()
+    hab.recordAlias('午饭', '工作餐')
+    const opts = hab.habitOptions()
+    const items = aid.normalizeAiResult(
+      { result: [{ date: '2026-11-05', direction: '支出', category: '午饭', amount: 45, note: '午饭' }] },
+      '', opts
+    )
+    items[0].category = '工作餐'
+    assert.equal(aid.validateDraft(items[0], opts).value.category, '工作餐')
+    assert.equal(items[0].originalCategory, '午饭')
+    hab.clearHabits()
+  })
 })
 
 console.log(`\n结果：通过 ${passed} 项，失败 ${failed} 项\n`)

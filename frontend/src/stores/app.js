@@ -18,7 +18,8 @@ import {
 } from '../lib/validation'
 
 const CACHE_KEY = 'business-archive'
-let inflight = null
+// inflight 记录发起请求的账号：账号切换时旧响应必须被丢弃，不能写进新账号的 state / 缓存
+let inflight = null // { uid, promise }
 
 export const useAppStore = defineStore('app', {
   state: () => ({
@@ -41,8 +42,9 @@ export const useAppStore = defineStore('app', {
     )
   },
   actions: {
-    _persist() {
-      const uid = useAuthStore().userId
+    // uid 由调用方捕获后传入：账号切换时不能用「当前」userId 决定缓存归属
+    _persist(uid = useAuthStore().userId) {
+      if (!uid) return
       this.cacheUid = uid
       writeCache(uid, CACHE_KEY, {
         profile: this.profile,
@@ -63,7 +65,9 @@ export const useAppStore = defineStore('app', {
         this.$reset()
         inflight = null
       }
-      if (inflight) return inflight
+      // 同账号复用在途请求；其它账号的在途请求直接丢弃，避免 B 复用 A 的响应
+      if (inflight && inflight.uid === uid) return inflight.promise
+      if (inflight && inflight.uid !== uid) inflight = null
 
       if (!force) {
         if (this.lastLoadedAt && this.cacheUid === uid && !this.isStale) return
@@ -82,7 +86,7 @@ export const useAppStore = defineStore('app', {
       }
 
       this.loading = true
-      inflight = (async () => {
+      const promise = (async () => {
         try {
           const [p, sc, ec, re, li, ir] = await Promise.all([
             supabase.from('profiles').select('*').eq('user_id', uid).maybeSingle(),
@@ -100,6 +104,8 @@ export const useAppStore = defineStore('app', {
           // 否则用户会看到全 0 的数字，误以为数据丢了
           const queryError = p.error || sc.error || ec.error || re.error || li.error || ir.error
           if (queryError) throw new Error(`档案加载失败：${queryError.message}`)
+          // 请求期间可能已切换账号：丢弃过期响应，绝不写进当前 state / 新账号缓存
+          if (useAuthStore().userId !== uid) return
           this.profile = p.data || null
           this.salaryConfig = sc.data || null
           this.expenses = ec.data || []
@@ -107,13 +113,14 @@ export const useAppStore = defineStore('app', {
           this.liabilities = li.data || []
           this.insuranceRules = ir.data || []
           this.lastLoadedAt = Date.now()
-          this._persist()
+          this._persist(uid)
         } finally {
           this.loading = false
-          inflight = null
+          if (inflight && inflight.uid === uid) inflight = null
         }
       })()
-      return inflight
+      inflight = { uid, promise }
+      return promise
     },
     async loadSalaryHistory() {
       const uid = useAuthStore().userId

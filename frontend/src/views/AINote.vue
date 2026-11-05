@@ -56,7 +56,7 @@
               </label>
               <label class="fld">
                 <span>分类</span>
-                <n-input v-model:value="d.category" size="small" placeholder="如 餐饮" />
+                <n-input v-model:value="d.category" size="small" placeholder="自动识别，可修改" />
               </label>
               <label class="fld">
                 <span>金额（元）</span>
@@ -129,6 +129,9 @@ import {
   makeBlankDraft, normalizeAiResult, isLowConfidence,
   validateDraft, collectWritable
 } from '../lib/aiDraft'
+import {
+  habitOptions, habitCategories, recordUsage, recordAlias
+} from '../lib/categoryHabits'
 
 const message = useMessage()
 const auth = useAuthStore()
@@ -153,7 +156,8 @@ const allSelected = computed(() => drafts.value.length > 0 && selectedCount.valu
 // 每条草稿实时校验，错误直接显示在卡片上；写入时再统一过一次校验层
 const checkedMap = computed(() => {
   const map = {}
-  drafts.value.forEach((d) => { map[d.id] = validateDraft(d) })
+  const options = habitOptions()
+  drafts.value.forEach((d) => { map[d.id] = validateDraft(d, options) })
   return map
 })
 const writableCount = computed(() =>
@@ -178,12 +182,17 @@ async function parseNote() {
   if (!noteText.value.trim()) return message.warning('先描述一下吧')
   parsing.value = true
   try {
-    const res = await callAgnes('parse_note', { text: noteText.value })
-    const items = normalizeAiResult(res)
+    // 把「你的常用分类」传给模型，新增分类无需改服务端
+    const res = await callAgnes('parse_note', {
+      text: noteText.value,
+      categories: habitCategories()
+    })
+    // 带上原文与习惯：模型没给分类或给了别名时自动归一，用户不必逐条改
+    const items = normalizeAiResult(res, noteText.value, habitOptions())
     if (!items.length) return message.warning('没解析出可用的账目，换个说法试试')
     // 追加而非替换：绝不覆盖用户已经编辑过的草稿
     drafts.value = [...drafts.value, ...items]
-    message.success(`新增 ${items.length} 笔草稿，请逐条核对`)
+    message.success(`新增 ${items.length} 笔草稿，分类已自动识别，请核对`)
   } catch (e) {
     message.error(e.message || '解析失败，请稍后重试')
   } finally {
@@ -213,7 +222,7 @@ function askClear() {
 
 // 单条与批量共用同一套校验；一次 insert 数组，失败则整批不落库
 async function writeDrafts(onlyId = null) {
-  const { writable, invalid } = collectWritable(drafts.value, onlyId)
+  const { writable, invalid } = collectWritable(drafts.value, onlyId, habitOptions())
   if (!writable.length) return message.warning(invalid[0]?.error || '没有可写入的条目')
   if (!onlyId && invalid.length) message.warning(`有 ${invalid.length} 笔未通过校验，已跳过`)
   await auth.ensureReady()
@@ -224,6 +233,19 @@ async function writeDrafts(onlyId = null) {
       writable.map((w) => ({ user_id: userId, ...w.value }))
     )
     if (error) throw new Error(error.message)
+    // 写库成功后才学；习惯记忆失败不能影响「写入成功」的结果反馈
+    try {
+      const byId = new Map(drafts.value.map((d) => [d.id, d]))
+      for (const w of writable) {
+        recordUsage(w.value.category)
+        const original = byId.get(w.id)
+        if (original?.originalCategory && original.originalCategory !== w.value.category) {
+          recordAlias(original.originalCategory, w.value.category)
+        }
+      }
+    } catch {
+      // 忽略：记账主流程已完成，不向用户误报失败
+    }
     const done = new Set(writable.map((w) => w.id))
     drafts.value = drafts.value.filter((d) => !done.has(d.id))
     message.success(`已写入 ${writable.length} 笔流水`)

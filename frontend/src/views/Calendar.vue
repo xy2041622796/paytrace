@@ -231,11 +231,19 @@ function cellClass(cell) {
 
 function selectDay(d) { selectedDay.value = d }
 
+// 跨月推演按 offset 线性滚动，且节假日静态表只覆盖 2026（2027 仅元旦兜底）：
+// 限制在当前月前后 24 个月，避免无界切月造成长耗时与不可信结果。
+const MAX_MONTH_OFFSET = 24
+function monthOffset() {
+  return (viewYear.value - todayYear) * 12 + (viewMonth.value - todayMonth)
+}
 function prevMonth() {
+  if (monthOffset() <= -MAX_MONTH_OFFSET) return
   if (viewMonth.value === 1) { viewMonth.value = 12; viewYear.value-- } else viewMonth.value--
   selectedDay.value = 1
 }
 function nextMonth() {
+  if (monthOffset() >= MAX_MONTH_OFFSET) return
   if (viewMonth.value === 12) { viewMonth.value = 1; viewYear.value++ } else viewMonth.value++
   selectedDay.value = 1
 }

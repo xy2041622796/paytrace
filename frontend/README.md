@@ -37,7 +37,7 @@
 - **个税累计预扣法**：`calcNetSalary(config, { monthIndex, ytdMonths })`，年度预扣率 7 档，本月税 = 累计税 − 上月累计税；录入年内真实历史薪资后精确重算。
 - **社保比例读表**：比例由 `insurance_rule` 表读取（`src/lib/insurance.js`），并计算公司缴纳，不再前端硬编码。
 - **节假日静态表**：`src/lib/holidays2026.js`，2026 法定假 / 调休补班已对照国务院办公厅通知逐条核验；2027 仅元旦兜底，待补全。
-- **工程质量**：三级缓存（内存 → localStorage → Supabase，TTL 12h）、`useBusy` 写操作互斥、统一校验层 `validation.js`（宁可明确拒绝，不静默截断）、月度对账容差、统一中文映射 `labels.js`。
+- **工程质量**：三级缓存（内存 → localStorage → Supabase，TTL 12h）、`useBusy` 写操作互斥、统一校验层 `validation.js`（宁可明确拒绝，不静默截断）、月度对账容差、统一中文映射 `labels.js`、AI / 手动记账分类自动归一（39 类默认清单 + 关键词兜底 + 习惯记忆：记住用过的分类与改过的说法，留空自动识别）。
 - **金额打码**：布局里「金额打码」开关写偏好 `paytrace:pref:privacyMask`，`formatMoney` 开启时返回 `••••`（带单位 `•••• 元`）；默认关闭，Node 环境无 localStorage 时自动回退关闭。
 
 ## 目录结构
@@ -46,9 +46,9 @@
 frontend/
 ├─ index.html
 ├─ package.json / package-lock.json
-├─ vite.config.js          # manualChunks：charts / ui / supabase / vendor
+├─ vite.config.js          # manualChunks：charts / ui / framework / supabase / vendor
 ├─ .env.example            # 复制为 .env 填入 Supabase 值
-├─ verify.mjs              # 83 项回归断言（esbuild + data URL 导入，无需临时文件）
+├─ verify.mjs              # 109 项回归断言（esbuild + data URL 导入，无需临时文件）
 ├─ lint.mjs                # 零依赖静态检查
 └─ src/
    ├─ main.js              # createApp + createPinia + 按需注册 Naive UI + 启动初始化 auth
@@ -83,7 +83,7 @@ VITE_SUPABASE_ANON_KEY=xxxx-anon-key
 ## 验证与产物
 
 ```bash
-npm run verify   # 83 项回归断言（社保 / 个税 / 按日均摊守恒 / 跨月一致性 / 校验层 / 组件注册）
+npm run verify   # 109 项回归断言（社保 / 个税 / 按日均摊守恒 / 跨月一致性 / 校验层 / 组件注册）
 npm run lint     # 零依赖静态检查（console.log / tab 属性 / weekOrder / 相对 import）
 npm run build    # vite build → dist/
 ```
@@ -94,7 +94,7 @@ npm run build    # vite build → dist/
 
 - 计算引擎仍在前端；节假日 / 调休用静态表 `holidays2026.js`（2026 已对照国务院通知核验，2027 待补全，生产应迁 `holiday_calendar` 表，RK-06）。日历属性仅用于展示，不做发薪 / 还款顺延，不影响资金金额。
 - 未录入年内历史薪资时，累计预扣假设年内每月薪资相同；录入真实工资条数据后精确重算（数据体检页会主动提示）。
-- 本机偏好（期初余额 / 每月固定还款 / 目标安全垫 / 年内历史薪资 / 对账容差 / 金额打码）只存 localStorage，不跨设备同步。
+- 本机偏好（期初余额 / 每月固定还款 / 目标安全垫 / 年内历史薪资 / 对账容差 / 金额打码）只存 localStorage，不跨设备同步；已按 `user_id` 分域，退出登录会清空当前账号数据。
 - 多月预测只统计已录入还款；未录入月份按固定开支 + 每月固定还款推演。
 - `ui` 约 751 kB / `charts` 约 503 kB 为第三方库，已拆为独立长期缓存 chunk，不再继续瘦身。
 - 「注销账户」仅提供说明入口，不执行删除（删除 `auth.users` 需 service_role / Edge Function，前端 anon 权限做不到）。

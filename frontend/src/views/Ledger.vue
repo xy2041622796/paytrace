@@ -132,6 +132,8 @@ import { toLocalISODate, todayISO, monthRangeISO } from '../lib/date'
 import { validateTransaction, validatePendingIncome, round2 } from '../lib/validation'
 import { readPref, writePref, readStartBalance, writeStartBalance } from '../lib/prefs'
 import { DEFAULT_TOLERANCE, normalizeTolerance, findUnmatchedEvents } from '../lib/reconcile'
+import { inferCategory, normalizeCategory } from '../lib/aiDraft'
+import { habitOptions, learnFromRows, recordUsage } from '../lib/categoryHabits'
 
 const message = useMessage()
 const auth = useAuthStore()
@@ -143,6 +145,14 @@ const pending = ref([])
 const selectedMonth = ref(Date.now())
 const keyword = ref('')
 const form = reactive({ date: Date.now(), direction: 'expense', category: '', amount: 0, note: '' })
+
+// 备注里写了「午饭 / 打车」等就自动带出分类；只在用户没填分类时生效，不覆盖手填值
+watch(() => form.note, (v) => {
+  if (!String(form.category || '').trim()) {
+    const guess = inferCategory(v, habitOptions())
+    if (guess) form.category = guess
+  }
+})
 const newPending = reactive({ type: '', est_amount: 0, condition: '' })
 const directionOptions = [
   { label: '支出', value: 'expense' },
@@ -324,7 +334,9 @@ function exportCsv() {
   message.success(`已导出 ${filteredRows.value.length} 条流水`)
 }
 
+let loadSeq = 0
 async function load() {
+  const seq = ++loadSeq
   await auth.ensureReady()
   const uid = auth.userId
   if (!uid) return
@@ -337,9 +349,13 @@ async function load() {
     supabase.from('pending_income').select('*').eq('user_id', uid)
       .order('created_at', { ascending: false })
   ])
+  // 快速切月时丢弃过期响应，避免旧月数据覆盖新月
+  if (seq !== loadSeq) return
   const err = txnRes.error || pendRes.error
   if (err) return message.error(err.message)
   rows.value = txnRes.data || []
+  // 复用已有查询结果导入历史分类习惯，不发额外请求
+  learnFromRows(txnRes.data || [])
   pending.value = pendRes.data || []
 }
 
@@ -347,7 +363,7 @@ async function add() {
   const checked = validateTransaction({
     txn_date: toLocalISODate(form.date),
     direction: form.direction,
-    category: form.category,
+    category: normalizeCategory(form.category, form.note, habitOptions()),
     amount: form.amount,
     note: form.note,
     source: 'manual'
@@ -359,6 +375,11 @@ async function add() {
   const ok = await run(async () => {
     const { error } = await supabase.from('transaction').insert({ user_id: uid, ...checked.value })
     if (error) throw error
+    try {
+      recordUsage(checked.value.category)
+    } catch {
+      // 习惯记忆失败不影响记账结果
+    }
     Object.assign(form, { date: Date.now(), direction: 'expense', category: '', amount: 0, note: '' })
     await load()
   })

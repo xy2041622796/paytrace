@@ -5,21 +5,45 @@
 // 对应 PRD 附录 A「AI 六模块契约」与 FR-08 / FR-13
 // ============================================================
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+// 锁定版本：避免 unpinned CDN 依赖被上游变更或劫持
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.4";
 
 // agnes-3.0-flash 接入点（OpenAI 兼容 chat/completions 形态，Bearer 鉴权）
-// 已确认：Base URL https://api.agnes-ai.cn/v1，Chat Completions POST /v1/chat/completions
-// 输入模态：文本 / 图像 URL；输出模态：文本（当前仅用文本）
 const AGNES_URL = Deno.env.get("AGNES_API_URL") ?? "https://api.agnes-ai.cn/v1/chat/completions";
 const AGNES_KEY = Deno.env.get("AGNES_API_KEY") ?? "";
 const MODEL = "agnes-3.0-flash";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
-function json(o: unknown, status = 200): Response {
+const MAX_TEXT = 500;
+const MAX_CONTEXT = 4000;
+const UPSTREAM_TIMEOUT_MS = 15000;
+
+// 生产环境用 ALLOWED_ORIGINS 配置前端域名（逗号分隔）；
+// 未配置时回显请求 Origin，保证本地与预览环境可用。
+const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") ?? "")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+
+function corsFor(req: Request): { headers: Record<string, string>; allowed: boolean } {
+  const origin = req.headers.get("Origin") ?? "";
+  const allowed = ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes(origin);
+  return {
+    allowed,
+    headers: {
+      "Access-Control-Allow-Origin": allowed ? (origin || "*") : "null",
+      "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Max-Age": "86400",
+      "Vary": "Origin",
+      "Cache-Control": "no-store",
+    },
+  };
+}
+
+function json(o: unknown, status: number, headers: Record<string, string>): Response {
   return new Response(JSON.stringify(o), {
     status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 
@@ -28,7 +52,7 @@ const PARSE_NOTE_SYSTEM = `你是个人现金流记账助手。把用户的大�
 只输出一个 JSON 对象，不要任何解释文字。格式：
 {
   "items": [
-    {"date":"YYYY-MM-DD","direction":"收入|支出","category":"餐饮|话费|通勤|零食|购物|娱乐|医疗|其他","amount":数字(元,正数),"note":"一句话备注","confidence":0到1的小数}
+    {"date":"YYYY-MM-DD","direction":"收入|支出","category":"分类名（优先从用户常用分类清单里选）","amount":数字(元,正数),"note":"一句话备注","confidence":0到1的小数}
   ],
   "confidence": 0到1的小数
 }
@@ -38,7 +62,7 @@ const PARSE_NOTE_SYSTEM = `你是个人现金流记账助手。把用户的大�
 3. date：相对"今天"推算。今天=系统给定当天；"昨天"=前一天；"前天"=前两天；"上周X""本周X"按日历倒推；"X号""X日"=本月X号（超本月天数则取月末）；"月初/月底"分别取1号/月末。拿不准给今天。
 4. direction 推断：含"发工资/到账/收/报销/奖金/退款/还我"等→收入；含"花/买/付/充/吃/打车/房租/还款/点"等→支出。
 5. amount 必须是正数、单位元。"三十"→30，"3块5"→3.5，"花了45"→45。不得带负号、不得写"约"。
-6. category 只能取枚举之一，拿不准用"其他"。
+6. category：优先从「用户常用分类清单」里选最接近的一个；清单为空时按常见生活分类自行判断，也可用用户原文里的简短说法新建分类名（不超过 12 个字）。拿不准用"其他"，禁止臆造。
 7. confidence：对该笔「日期/方向/金额/分类」四项整体把握度。任意一项不确定就 <0.7；顶层 confidence 取各笔的最小值。
 8. 严禁编造用户没说过的日期、金额、笔数或分类；用户没提金额就不要估一个填进去。`;
 
@@ -63,44 +87,66 @@ safetyLine=现金安全线(元)。字段可能缺失，缺失时按「信息不�
 4. disclaimer 字段必填，且一字不改原文输出。`;
 
 Deno.serve(async (req: Request) => {
-  if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+  const { headers, allowed } = corsFor(req);
+  const reply = (o: unknown, status = 200) => json(o, status, headers);
+
+  // 浏览器跨域 POST（带 Authorization + application/json）会先发 OPTIONS 预检
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: allowed ? 204 : 403, headers });
+  }
+  if (req.method !== "POST") return reply({ error: "method not allowed" }, 405);
+  if (!allowed) return reply({ error: "origin not allowed" }, 403);
 
   const auth = req.headers.get("Authorization") ?? "";
   const jwt = auth.replace(/^Bearer\s+/i, "");
-  if (!jwt) return json({ error: "unauthorized" }, 401);
+  if (!jwt) return reply({ error: "unauthorized" }, 401);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: auth } },
   });
   const { data: userData, error: ue } = await supabase.auth.getUser(jwt);
-  if (ue || !userData.user) return json({ error: "invalid token" }, 401);
+  if (ue || !userData.user) return reply({ error: "invalid token" }, 401);
   const userId = userData.user.id;
 
   let body: any;
-  try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
+  try { body = await req.json(); } catch { return reply({ error: "bad json" }, 400); }
   const action: string = body.action;
-  if (!action) return json({ error: "missing action" }, 400);
+  if (!action) return reply({ error: "missing action" }, 400);
+
+  // 输入限长：既约束上游 token 成本，也避免超长文本拖垮提示词
+  const text = String(body.text ?? "").slice(0, MAX_TEXT);
+  if (!text.trim()) return reply({ error: "missing text" }, 400);
 
   let systemPrompt = "";
   let userPrompt = "";
   if (action === "parse_note") {
     systemPrompt = PARSE_NOTE_SYSTEM;
-    userPrompt = String(body.text ?? "");
+    // 用户常用分类由前端传入：新增分类无需改服务端；清洗换行/引号并限长，降低提示词注入面
+    const cats: string[] = Array.isArray(body.categories)
+      ? body.categories
+          .map((c: unknown) => String(c ?? "").replace(/[\r\n"'<>]/g, "").trim().slice(0, 16))
+          .filter(Boolean)
+          .slice(0, 40)
+      : [];
+    const catHint = cats.length ? `\n用户常用分类（优先从这里选）：${cats.join("、")}` : "";
+    userPrompt = text + catHint;
   } else if (action === "advise_purchase") {
     systemPrompt = ADVISE_PURCHASE_SYSTEM;
-    userPrompt = JSON.stringify(body.context ?? {}) + "\n用户想买：" + String(body.text ?? "");
+    userPrompt = JSON.stringify(body.context ?? {}).slice(0, MAX_CONTEXT) + "\n用户想买：" + text;
   } else {
-    return json({ error: "unknown action" }, 400);
+    return reply({ error: "unknown action" }, 400);
   }
 
   if (!AGNES_URL || !AGNES_KEY) {
-    return json({ error: "agnes not configured" }, 500);
+    console.error("agnes not configured");
+    return reply({ error: "AI 服务未配置" }, 500);
   }
 
   try {
     const upstream = await fetch(AGNES_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + AGNES_KEY },
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       body: JSON.stringify({
         model: MODEL,
         messages: [
@@ -112,7 +158,9 @@ Deno.serve(async (req: Request) => {
       }),
     });
     if (!upstream.ok) {
-      return json({ error: "agnes upstream error", status: upstream.status }, 502);
+      // 上游状态与异常详情只留服务端日志，不回传客户端
+      console.error("agnes upstream error", upstream.status);
+      return reply({ error: "AI 服务暂不可用" }, 502);
     }
     const data = await upstream.json();
     const content: string = data?.choices?.[0]?.message?.content ?? "{}";
@@ -137,19 +185,24 @@ Deno.serve(async (req: Request) => {
       isDraft = (levels.length ? Math.min(...levels) : 0) < 0.7;
     }
 
-    // AI 交互日志（反馈闭环 / 六模块第 6 项）
-    await supabase.from("ai_interaction_log").insert({
-      user_id: userId,
-      action,
-      raw_input: body.text ?? "",
-      parsed_json: parsed,
-      confidence,
-      model_version: MODEL,
-    });
+    // AI 交互日志（反馈闭环 / 六模块第 6 项）：写日志失败不影响主流程返回
+    try {
+      await supabase.from("ai_interaction_log").insert({
+        user_id: userId,
+        action,
+        raw_input: text,
+        parsed_json: parsed,
+        confidence,
+        model_version: MODEL,
+      });
+    } catch (e) {
+      console.error("ai log write failed", e);
+    }
 
     // 低置信：仅返回草稿，前端强制用户确认后才落库（FR-08）
-    return json({ result: resultPayload, draft: isDraft });
+    return reply({ result: resultPayload, draft: isDraft });
   } catch (e) {
-    return json({ error: "agnes call failed", detail: String(e) }, 502);
+    console.error("agnes call failed", e);
+    return reply({ error: "AI 服务暂不可用" }, 502);
   }
 });

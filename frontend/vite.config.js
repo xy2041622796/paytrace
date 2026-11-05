@@ -21,12 +21,11 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes('node_modules')) return
           if (id.includes('echarts') || id.includes('zrender')) return 'charts'
-          if (
-            id.includes('naive-ui') || id.includes('vueuc') || id.includes('vooks') ||
-            id.includes('seemly') || id.includes('css-render') || id.includes('evtd') ||
-            id.includes('date-fns') || id.includes('treemate')
-          ) return 'ui'
           if (id.includes('@supabase')) return 'supabase'
+          // vue 生态单独成 chunk：既不回落到 vendor 形成 ui ↔ vendor 循环，
+          // 也不会把一个 chunk 撑过 800 kB；ui 只依赖 framework，方向单向
+          if (/[\\/]node_modules[\\/](?:vue|@vue|pinia|vue-router)[\\/]/.test(id)) return 'framework'
+          if (/[\\/]node_modules[\\/](?:naive-ui|vueuc|vooks|seemly|css-render|evtd|date-fns|treemate)[\\/]/.test(id)) return 'ui'
           return 'vendor'
         }
       }

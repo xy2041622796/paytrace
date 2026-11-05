@@ -1,28 +1,35 @@
 // ============================================================
 // PII 脱敏偏好：金额打码开关
-// key 与 prefs.js 的 paytrace:pref: 命名空间一致，但独立实现，
-// 保证 Node / 无 localStorage 环境（回归测试、SSR）不会抛错。
+// 复用 prefs.js 的账号隔离命名空间；打码状态在内存缓存，
+// 避免 formatMoney 在模板 v-for 中每次调用都同步读 localStorage。
 // 默认关闭：formatMoney 行为保持原样，verify.mjs 的断言不受影响。
 // ============================================================
-const KEY = 'paytrace:pref:privacyMask'
+import { readPref, writePref, getPrefScope } from './prefs'
+
+let cache = null // { scope, value }，scope 变化（切换账号）自动失效
+
+// 跨标签页 / 退出登录时由调用方显式失效
+export function invalidatePrivacyMask() {
+  cache = null
+}
 
 export function readPrivacyMask() {
+  const currentScope = getPrefScope()
+  if (cache && cache.scope === currentScope) return cache.value
+  let value = false
   try {
-    const raw = localStorage.getItem(KEY)
-    if (raw == null) return false
-    return JSON.parse(raw) === true
+    value = readPref('privacyMask', false) === true
   } catch {
-    // Node 环境无 localStorage、隐私模式禁用存储、或内容损坏：一律视为关闭
-    return false
+    value = false
   }
+  cache = { scope: currentScope, value }
+  return value
 }
 
 export function writePrivacyMask(value) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(value === true))
-  } catch {
-    // 隐私模式 / 配额不足：仅本次会话生效，不阻断业务，也不抛错
-  }
+  const next = value === true
+  cache = { scope: getPrefScope(), value: next }
+  writePref('privacyMask', next)
 }
 
 export function isPrivacyOn() {

@@ -1,39 +1,133 @@
 // ============================================================
-// 用户偏好持久化（无 TTL，仅本机、仅当前用户）
+// 用户偏好持久化（按账号隔离，无 TTL，仅本机）
 // 用于目标安全垫、年内历史薪资、每月固定还款、对账期初余额等
 // 这些数据不适合放进 Supabase（要么是本机的试算参数，要么涉及历史工资条）
+// 红线：不同账号必须读到各自的偏好；退出登录清理当前账号数据。
 // ============================================================
 const PREFIX = 'paytrace:pref:'
+const SCOPE_KEY = 'paytrace:pref-scope'
+
+let scope = null
+let scopeLoaded = false
+
+function storage() {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage
+  } catch {
+    return null
+  }
+}
+
+// 账号作用域只在首次读取 / 显式设置时碰 localStorage，
+// formatMoney 等渲染热路径走内存缓存，不再产生同步 IO。
+export function getPrefScope() {
+  if (!scopeLoaded) {
+    scopeLoaded = true
+    try {
+      scope = storage()?.getItem(SCOPE_KEY) || ''
+    } catch {
+      scope = ''
+    }
+  }
+  return scope
+}
+
+export function setPrefScope(uid) {
+  scope = uid || ''
+  scopeLoaded = true
+  try {
+    storage()?.setItem(SCOPE_KEY, scope)
+  } catch {
+    // 隐私模式：仅本次会话生效
+  }
+}
+
+const scopedKey = (key) => {
+  const s = getPrefScope()
+  return `${PREFIX}${s ? s + ':' : ''}${key}`
+}
+const legacyKey = (key) => PREFIX + key
+
+function emitPrefChange(key) {
+  if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return
+  try {
+    window.dispatchEvent(new CustomEvent('paytrace:pref-changed', { detail: { key } }))
+  } catch {
+    // 事件派发失败不影响写入结果
+  }
+}
 
 export function readPref(key, fallback) {
+  const s = storage()
+  if (!s) return fallback
+  const k = scopedKey(key)
   try {
-    const raw = localStorage.getItem(PREFIX + key)
-    if (raw == null) return fallback
-    const parsed = JSON.parse(raw)
-    return parsed == null ? fallback : parsed
+    const raw = s.getItem(k)
+    if (raw != null) {
+      const parsed = JSON.parse(raw)
+      return parsed == null ? fallback : parsed
+    }
+    // 旧版全局 key 一次性迁移到当前账号：升级不丢值，也终止跨账号共享
+    const oldKey = legacyKey(key)
+    if (k !== oldKey) {
+      const old = s.getItem(oldKey)
+      if (old != null) {
+        const parsed = JSON.parse(old)
+        try {
+          s.setItem(k, old)
+          s.removeItem(oldKey)
+        } catch {
+          // 配额不足时保留旧值，下次读取仍可拿到
+        }
+        return parsed == null ? fallback : parsed
+      }
+    }
+    return fallback
   } catch {
     return fallback
   }
 }
 
 export function writePref(key, value) {
+  const s = storage()
+  if (!s) return
   try {
-    localStorage.setItem(PREFIX + key, JSON.stringify(value))
-    // 同页即时刷新推演；跨标签页另由 storage 事件处理
-    window.dispatchEvent(new CustomEvent('paytrace:pref-changed', { detail: { key } }))
+    s.setItem(scopedKey(key), JSON.stringify(value))
   } catch {
     // 隐私模式 / 配额不足：仅本次会话生效，不阻断业务
   }
+  emitPrefChange(key)
+}
+
+// 退出登录时清掉当前账号的全部本机偏好（含年内真实薪资），不留给下一个账号
+export function clearPrefs() {
+  const s = storage()
+  const prefix = scopedKey('')
+  if (s) {
+    try {
+      Object.keys(s).filter((k) => k.startsWith(prefix)).forEach((k) => s.removeItem(k))
+    } catch {
+      // noop
+    }
+  }
+  scope = ''
+  scopeLoaded = true
+  try {
+    s?.setItem(SCOPE_KEY, '')
+  } catch {
+    // noop
+  }
+  emitPrefChange('*')
 }
 
 // 兼容早期散落的 localStorage key，避免升级后丢用户已填的值
-export function migrateLegacy(legacyKey, prefKey, fallback) {
+export function migrateLegacy(legacyKeyName, prefKey, fallback) {
   try {
-    const old = localStorage.getItem(legacyKey)
+    const old = localStorage.getItem(legacyKeyName)
     if (old == null) return readPref(prefKey, fallback)
     const value = Number(old) || 0
     writePref(prefKey, value)
-    localStorage.removeItem(legacyKey)
+    localStorage.removeItem(legacyKeyName)
     return value
   } catch {
     return readPref(prefKey, fallback)

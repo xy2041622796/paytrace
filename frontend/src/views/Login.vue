@@ -75,7 +75,9 @@ async function onSubmit() {
         return
       }
     }
-    const redirect = route.query.redirect || '/dashboard'
+    // 只接受站内绝对路径，避免把 query 里的外部地址交给 router
+    const raw = String(route.query.redirect || '')
+    const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/dashboard'
     router.replace(redirect)
   } catch (e) {
     const msg = e.message || '操作失败'

@@ -75,7 +75,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
-import { readPrivacyMask, writePrivacyMask } from '../lib/privacy'
+import { readPrivacyMask, writePrivacyMask, invalidatePrivacyMask } from '../lib/privacy'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -106,15 +106,19 @@ function togglePrivacyMobile() {
 }
 
 function syncPrivacy() {
+  invalidatePrivacyMask()
   privacyOn.value = readPrivacyMask()
 }
 
 function onPrefChanged(e) {
-  if (e?.detail?.key === 'privacyMask') syncPrivacy()
+  if (e?.detail?.key === 'privacyMask' || e?.detail?.key === '*') syncPrivacy()
 }
 
 function onStorage(e) {
-  if (e?.key === 'paytrace:pref:privacyMask' || e?.key == null) syncPrivacy()
+  // 偏好已按账号分域：key 形如 paytrace:pref:<uid>:privacyMask
+  if (e?.key == null ||
+      (e.key.startsWith('paytrace:pref:') && e.key.endsWith('privacyMask')) ||
+      e.key === 'paytrace:pref-scope') syncPrivacy()
 }
 
 async function logout() {

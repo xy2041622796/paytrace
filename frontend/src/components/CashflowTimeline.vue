@@ -13,7 +13,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers'
 import { useThemeStore } from '../stores/theme'
 import { useIsMobile } from '../composables/useMediaQuery'
-import { DAY_TYPE_LABEL, formatMoney } from '../lib/labels'
+import { DAY_TYPE_LABEL, formatMoney, escapeHtml } from '../lib/labels'
 
 // 按需注册：只打包折线图与用到的组件，避免全量 ECharts 撑大首屏包
 echarts.use([
@@ -132,16 +132,19 @@ function buildOption() {
       textStyle: { color: p.text, fontSize: 12 },
       extraCssText: 'box-shadow: 0 4px 16px rgba(0,0,0,.18);',
       axisPointer: { lineStyle: { color: p.border } },
+      // ECharts 默认以 HTML 渲染 tooltip：用户可控的事件名/分类名必须先转义
       formatter: (param) => {
         if (!param || !param.length) return ''
         const idx = param[0].dataIndex
         const dt = DAY_TYPE_LABEL[props.dayTypes[idx]] || ''
         const ev = props.events
           .filter((e) => e.day - 1 === idx)
-          .map((e) => `${e.label}：${formatMoney(e.amount)}`)
+          .map((e) => `${escapeHtml(e.label)}：${formatMoney(e.amount)}`)
           .join('<br/>')
-        const lines = param.map((s) => `${s.seriesName}：<b>${formatMoney(s.data)}</b>`).join('<br/>')
-        return `${props.dates[idx]} · ${dt}<br/>${lines}${ev ? '<br/>' + ev : ''}`
+        const lines = param.map((s) =>
+          `${escapeHtml(s.seriesName)}：<b>${formatMoney(s.data)}</b>`
+        ).join('<br/>')
+        return `${escapeHtml(props.dates[idx])} · ${escapeHtml(dt)}<br/>${lines}${ev ? '<br/>' + ev : ''}`
       }
     },
     xAxis: {
@@ -178,7 +181,8 @@ function buildOption() {
 
 function render() {
   if (!chart) return
-  chart.setOption(buildOption(), true)
+  // replaceMerge 只替换 series，其余配置复用；lazyUpdate 合并同一帧的多次重绘
+  chart.setOption(buildOption(), { replaceMerge: ['series'], lazyUpdate: true })
 }
 function resize() {
   chart && chart.resize()
@@ -201,7 +205,8 @@ onBeforeUnmount(() => {
   chart && chart.dispose()
   chart = null
 })
-watch(() => [props.dates, props.series, props.events, props.dayTypes], render, { deep: true })
+// props 每次重算都会生成新引用，浅层监听即可；deep 会遍历整份逐日数据
+watch(() => [props.dates, props.series, props.events, props.dayTypes], render)
 watch(() => theme.mode, () => nextTick(render))
 watch(() => isMobile.value, () => nextTick(render))
 </script>

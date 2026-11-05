@@ -7,6 +7,11 @@ on:
 jobs:
   verify-and-build:
     runs-on: ubuntu-latest
+    env:
+      # 在 GitHub 仓库 Settings → Secrets and variables → Actions → Variables 添加这两个值；
+      # 未配置时为空串，构建仍通过，但产物无法连库（仅影响部署产物）。
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
     defaults:
       run:
         working-directory: frontend

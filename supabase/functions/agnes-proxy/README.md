@@ -10,6 +10,7 @@
 ```bash
 supabase secrets set AGNES_API_URL="https://api.agnes-ai.cn/v1/chat/completions"
 supabase secrets set AGNES_API_KEY="<从 agnes 控制台获取的密钥>"
+supabase secrets set ALLOWED_ORIGINS="https://你的前端域名"
 # SUPABASE_URL / SUPABASE_ANON_KEY 由 Supabase 自动注入，无需手动设置
 ```
 > 安全提示：API Key 仅存于 Supabase Secrets（服务端），**切勿提交到代码仓库或前端**。
@@ -23,6 +24,10 @@ supabase functions deploy agnes-proxy
 ```
 
 部署时若使用自定义 JWT 校验，可不加 `--no-verify-jwt`（本函数内部已用 `auth.getUser(jwt)` 校验用户身份，建议保留 JWT 校验）。
+
+> **CORS / 输入约束**：浏览器跨域调用会先发 `OPTIONS` 预检，函数已内置预检分支并回显 `Access-Control-Allow-Origin`。生产环境用 `ALLOWED_ORIGINS`（逗号分隔的前端域名）收紧来源；未配置时回显请求 Origin 以便本地/预览可用。`text` 上限 500 字、上下文 4000 字，上游调用 15s 超时；上游异常详情只写服务端日志，不回传客户端。
+
+> **动态分类清单**：`parse_note` 请求可带 `categories`（字符串数组，前端由本机「分类习惯」生成）。函数清洗换行/引号、每项截 16 字、最多 40 项后注入提示词，模型优先从该清单里选分类，清单为空时按常见生活分类自行判断，也允许用户原文里的简短新分类名。因此**新增分类只需前端改，无需再改服务端**。提示词本次有调整，需重新部署：`supabase functions deploy agnes-proxy`。
 
 ## 3. 前端调用（Vue3 示例）
 

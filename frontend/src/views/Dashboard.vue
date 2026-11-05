@@ -346,11 +346,29 @@ const cushionHint = computed(() => {
     : `未来 ${forecastMonths.value} 个月内尚未达成；可以试着调高「假设税前月薪」看调薪后的变化。`
 })
 
-watch(startBalance, (v) => writeStartBalance(v))
-watch(recurringRepayment, (v) => writePref('recurringRepayment', Number(v) || 0))
-watch(targetCushion, (v) => writePref('cushionTarget', Number(v) || 0))
-watch(scenarioBonus, (v) => writePref('scenarioBonus', Number(v) || 0))
-watch(bonusEnabled, (v) => writePref('scenarioBonusEnabled', !!v))
+// 偏好写入防抖：数字输入每敲一位都写 localStorage + 广播事件，
+// 会触发全量多月推演与图表重绘；合并 250ms 内的连续输入只落一次盘。
+function debounced(fn, ms) {
+  let timer = null
+  const wrapped = (...args) => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => { timer = null; fn(...args) }, ms)
+  }
+  wrapped.cancel = () => { if (timer) clearTimeout(timer); timer = null }
+  return wrapped
+}
+const writers = [
+  debounced((v) => writeStartBalance(v), 250),
+  debounced((v) => writePref('recurringRepayment', Number(v) || 0), 250),
+  debounced((v) => writePref('cushionTarget', Number(v) || 0), 250),
+  debounced((v) => writePref('scenarioBonus', Number(v) || 0), 250),
+  debounced((v) => writePref('scenarioBonusEnabled', !!v), 250)
+]
+watch(startBalance, (v) => writers[0](v))
+watch(recurringRepayment, (v) => writers[1](v))
+watch(targetCushion, (v) => writers[2](v))
+watch(scenarioBonus, (v) => writers[3](v))
+watch(bonusEnabled, (v) => writers[4](v))
 
 async function forceRefresh() {
   refreshing.value = true
@@ -384,6 +402,8 @@ onMounted(() => {
   loadData()
 })
 onBeforeUnmount(() => {
+  // 卸载后不再落盘，避免防抖定时器写入已失效的偏好
+  writers.forEach((w) => w.cancel())
   window.removeEventListener('paytrace:pref-changed', onPrefChange)
   window.removeEventListener('storage', onPrefChange)
 })
