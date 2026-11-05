@@ -1,0 +1,107 @@
+/* ============================================================
+   极简留白主题（与「表情喵」视觉语言一致）
+   白底 + 1px 浅灰描边 + 唯一橙色 #FF6B35 强调
+   深色模式：<html data-theme="dark"> 覆盖 --c-* 变量
+   ============================================================ */
+:root {
+  color-scheme: light;
+  --c-bg: #FFFFFF;
+  --c-surface: #FFFFFF;
+  --c-border: #E5E7EB;        /* 1px 浅灰描边 */
+  --c-primary: #FF6B35;       /* 唯一强调色 橙 */
+  --c-primary-soft: #FFF1EB;  /* 橙色浅底（选中/背景） */
+  --c-text: #1F2937;          /* 主文字 */
+  --c-text-2: #6B7280;        /* 次要文字 */
+  --c-text-3: #9CA3AF;        /* 占位/弱 */
+  --c-danger: #EF4444;        /* 逾期/风险 */
+  --c-success: #10B981;       /* 安全/到账 */
+  --c-warning: #F59E0B;       /* 预警 */
+  --c-warning-text: #B45309;  /* 预警文字（浅底可读） */
+  --c-hover: #F5F6F8;         /* 悬停底色 */
+  --c-split: #F3F4F6;         /* 图表网格线 */
+  --radius: 10px;
+  --radius-sm: 8px;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --c-bg: #14171C;
+  --c-surface: #1D2129;
+  --c-border: #303642;
+  --c-primary: #FF8457;
+  --c-primary-soft: rgba(255, 107, 53, 0.18);
+  --c-text: #E9ECF1;
+  --c-text-2: #A6AFBD;
+  --c-text-3: #7C8593;
+  --c-danger: #F87171;
+  --c-success: #34D399;
+  --c-warning: #FBBF24;
+  --c-warning-text: #FBBF24;
+  --c-hover: #272C36;
+  --c-split: #272C36;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  color: var(--c-text);
+  background: var(--c-bg);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color .2s ease, color .2s ease;
+}
+
+/* 通用卡片：白底 + 1px 浅灰描边，无重阴影，符合极简留白 */
+.card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 20px;
+  transition: background-color .2s ease, border-color .2s ease;
+}
+
+/* 橙色主按钮视觉（配合 Naive UI 主题覆盖） */
+.btn-primary {
+  background: var(--c-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 18px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: opacity .15s;
+}
+.btn-primary:hover { opacity: .9; }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+.text-primary { color: var(--c-primary); }
+.text-danger { color: var(--c-danger); }
+.text-success { color: var(--c-success); }
+.text-2 { color: var(--c-text-2); }
+.muted { color: var(--c-text-3); }
+
+/* 1px 描边输入框风格（Naive 未覆盖处的兜底） */
+.field-label { font-size: 13px; color: var(--c-text-2); margin-bottom: 6px; }
+
+/* ============================================================
+   移动端适配 & 可访问性
+   ============================================================ */
+@media (max-width: 768px) {
+  .card { padding: 14px; border-radius: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23FF6B35'/%3E%3Cpath d='M14 42 L27 29 L37 37 L50 21' stroke='white' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <title>现金流安全垫</title>
+    <script>
+      // 首屏防闪白：Vue 挂载前先定主题（与 stores/theme.js 同规则）
+      (function () {
+        try {
+          var m = localStorage.getItem('paytrace-theme');
+          if (m !== 'light' && m !== 'dark') {
+            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark' : 'light';
+          }
+          document.documentElement.dataset.theme = m;
+          document.documentElement.style.colorScheme = m;
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

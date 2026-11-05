@@ -1,0 +1,26 @@
+{
+  "name": "cashflow-cushion-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "现金流安全垫 · Vue3 前端骨架（MVP 雏形）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "verify": "node verify.mjs",
+    "lint": "node lint.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.43.4",
+    "echarts": "^5.5.1",
+    "naive-ui": "^2.38.2",
+    "pinia": "^2.3.1",
+    "vue": "^3.4.31",
+    "vue-router": "^4.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.5",
+    "vite": "^5.3.3"
+  }
+}
