@@ -4,6 +4,8 @@
 // 这些数据不适合放进 Supabase（要么是本机的试算参数，要么涉及历史工资条）
 // 红线：不同账号必须读到各自的偏好；退出登录清理当前账号数据。
 // ============================================================
+import { todayISO, nowCN } from './date'
+
 const PREFIX = 'paytrace:pref:'
 const SCOPE_KEY = 'paytrace:pref-scope'
 
@@ -172,4 +174,80 @@ export function writeExpenseSpreadMode(mode) {
 // 每月固定还款：仪表盘与日历必须读同一个偏好（含旧 key 兼容）
 export function readRecurringRepayment() {
   return Number(migrateLegacy('paytrace:forecast-recurring', 'recurringRepayment', 0)) || 0
+}
+
+// ============================================================
+// 当前真实余额 + 余额变动台账
+// ------------------------------------------------------------
+// 两者存在同一个 key、一次写入：保证「首页显示的余额」与「台账最新一条」
+// 永远一致，绝不会出现「钱变了没记录」或「有记录钱没变」。
+// 红线：
+// 1. 金额一律以「分」为整数运算，杜绝 0.1 + 0.2 之类的浮点漂移。
+// 2. 台账 append-only：只追加，不覆盖、不删除；首次记录为基线（from=null），
+//    绝不编造一个「上一次余额」。
+// 3. 每条含完整北京时间、变更前 / 后、差额、原因；差额恒等于 后 − 前。
+// 4. 按账号隔离（复用 scopedKey），退出登录随其它本机偏好一起清理。
+// ============================================================
+const BALANCE_KEY = 'currentBalance'
+const cents = (n) => Math.round(Number(n) * 100)
+const yuan = (c) => c / 100
+
+export function readCurrentBalance() {
+  const v = readPref(BALANCE_KEY, null)
+  if (!v || typeof v !== 'object') return { value: null, updatedAt: '', log: [] }
+  const n = Number(v.value)
+  return {
+    value: Number.isFinite(n) ? yuan(cents(n)) : null,
+    updatedAt: String(v.updatedAt || ''),
+    log: Array.isArray(v.log) ? v.log : []
+  }
+}
+
+// 写入余额并同步追加一条台账。options: { reason }
+// 首次写入（或旧版本数据无台账）自动记为基线，from 为 null。
+export function writeCurrentBalance(value, options = {}) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return   // 非法金额绝不落库
+  const c = cents(n)
+  const prev = readCurrentBalance()
+  const log = prev.log.slice()
+  const isBaseline = prev.value == null || log.length === 0
+  const fromC = isBaseline ? null : cents(prev.value)
+  const deltaC = fromC == null ? null : c - fromC
+  const rec = {
+    id: `${Date.now()}-${log.length}`,
+    at: nowCN(),
+    date: todayISO(),
+    from: fromC == null ? null : yuan(fromC),
+    to: yuan(c),
+    delta: deltaC == null ? null : yuan(deltaC),
+    reason: String(options.reason || '').trim().slice(0, 120) || '手动更新余额',
+    kind: isBaseline ? 'baseline' : 'update'
+  }
+  log.push(rec)
+  // value 与 log 一次写入，不可拆分，天然一致
+  writePref(BALANCE_KEY, { value: yuan(c), updatedAt: todayISO(), log })
+  return rec
+}
+
+export function readBalanceLog() {
+  return readCurrentBalance().log
+}
+
+// 逐条核对：差额自洽、链条前后衔接、最新值等于当前显示值
+export function verifyBalanceLog() {
+  const { value, log } = readCurrentBalance()
+  const chainOk = log.every((r, i) => {
+    if (r.from == null) return i === 0
+    return cents(r.from) === cents(log[i - 1].to) &&
+      cents(r.delta) === cents(r.to) - cents(r.from)
+  })
+  const latest = log.length ? log[log.length - 1].to : null
+  return {
+    count: log.length,
+    chainOk,
+    consistent: value != null && latest != null && cents(value) === cents(latest),
+    current: value,
+    latest
+  }
 }

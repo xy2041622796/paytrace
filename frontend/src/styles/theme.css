@@ -21,6 +21,7 @@
   --c-split: #F3F4F6;         /* 图表网格线 */
   --radius: 10px;
   --radius-sm: 8px;
+  --radius-lg: 18px;          /* 首屏大卡片 / 强调区块 */
 
   /* 动效系统：只动画 transform / opacity，时长克制，不干扰金额阅读 */
   --dur-fast: 140ms;
@@ -29,6 +30,9 @@
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-in-out: cubic-bezier(.4, 0, .2, 1);
 }
+
+/* 宽屏阅读宽度：放在所有 @keyframes 之前，避免单行关键帧被静态检查的提取正则跨界误捕获 */
+main.content > * { max-width: 1240px; margin-left: auto; margin-right: auto; }
 
 [data-theme='dark'] {
   color-scheme: dark;

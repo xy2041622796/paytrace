@@ -228,7 +228,11 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 .logout:hover { border-color: var(--c-danger); color: var(--c-danger); }
-.content { flex: 1; overflow-y: auto; padding: 28px 32px; min-width: 0; }
+.content {
+  flex: 1; overflow-y: auto; padding: 28px 32px; min-width: 0;
+  /* 极淡的暖色光晕，给界面一点呼吸感，不干扰金额阅读 */
+  background-image: radial-gradient(circle at 84% -10%, rgba(255, 107, 53, .07), transparent 46%);
+}
 
 .mobile-top, .mobile-nav { display: none; }
 

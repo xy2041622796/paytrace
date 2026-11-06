@@ -33,7 +33,7 @@ paytrace/
    ├─ index.html
    ├─ package.json / package-lock.json
    ├─ vite.config.js                 # manualChunks：charts / ui / framework / supabase / vendor
-   ├─ verify.mjs                     # 109 项回归断言（esbuild + data URL，无需临时文件）
+   ├─ verify.mjs                     # 124 项回归断言（esbuild + data URL，无需临时文件）
    ├─ lint.mjs                       # 零依赖静态检查
    ├─ README.md                      # 前端说明
    └─ src/
@@ -86,13 +86,13 @@ VITE_SUPABASE_ANON_KEY=xxxx-anon-key
 - **节假日静态表**：`holidays2026.js` 已对照国务院办公厅《关于 2026 年部分节假日安排的通知》逐条核验（法定假 + 6 个调休补班日）；**2027 数据仅元旦保守兜底，待补全**（RK-06）。日历属性仅用于展示，不挪动资金日期。
 - **发薪 / 还款遇休**：按交接文档 §11.2 的用户决策「照发 / 不顺延」，不做日期挪动。
 - **个税**：累计预扣法，支持录入年内真实历史薪资后精确重算；未录入时假设年内每月薪资相同。
-- **回归断言**：`frontend/verify.mjs` 共 **109 项**（含安全与隔离 9 项、智能分类 4 项、分类习惯 6 项，以及社保/个税/日历/校验/动效等既有断言），覆盖社保口径、累计预扣、按日均摊守恒、跨月一致性、账号隔离、HTML 转义、CORS、防抖、分类归一化与习惯记忆。
+- **回归断言**：`frontend/verify.mjs` 共 **124 项**（含安全与隔离 9 项、智能分类 4 项、分类习惯 6 项、AI 日期兜底 4 项、看得懂的现金流 6 项、余额变动台账 5 项，以及社保/个税/日历/校验/动效等既有断言），覆盖社保口径、累计预扣、按日均摊守恒、跨月一致性、账号隔离、HTML 转义、CORS、防抖、分类归一化、习惯记忆、日期合理性、逐笔明细、当前余额隔离、界面读法与台账精度 / 链条核对。
 
 ## 验证命令
 
 ```bash
 cd frontend
-npm run verify   # 109 项回归断言（纯函数 / 口径）
+npm run verify   # 124 项回归断言（纯函数 / 口径）
 npm run lint     # 零依赖静态检查（console.log / tab 属性 / weekOrder / import 路径）
 npm run build    # vite build → dist/
 ```

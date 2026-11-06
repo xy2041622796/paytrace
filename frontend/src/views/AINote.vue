@@ -40,6 +40,7 @@
                 {{ d.source === 'ai' ? '智能解析' : '手动添加' }}
               </span>
               <span v-if="isLowConfidence(d)" class="src-tag src-low">置信度偏低，请核对</span>
+              <span v-if="d.dateAdjusted" class="src-tag src-low">日期已修正，请核对</span>
               <n-button size="tiny" quaternary type="error" @click="removeDraft(d.id)">删除</n-button>
             </div>
 

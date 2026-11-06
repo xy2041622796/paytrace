@@ -36,6 +36,26 @@ export function todayISO() {
   return toLocalISODate(new Date())
 }
 
+// 当前完整时间（亚洲上海时区 GMT+8）：YYYY-MM-DD HH:mm:ss
+// 与 todayISO 同源，避免 UTC / 本机时区把日期或时间记错一天
+export function nowCN() {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai', hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).formatToParts(new Date())
+    const get = (t) => parts.find((p) => p.type === t)?.value || ''
+    const date = `${get('year')}-${get('month')}-${get('day')}`
+    const time = `${get('hour')}:${get('minute')}:${get('second')}`
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return `${date} ${time}`
+  } catch {
+    // 老环境无 Intl 时区支持时退回本地时间
+  }
+  const d = new Date()
+  return `${toLocalISODate(d)} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`
+}
+
 // 某月的首尾日期（用于精确查询当月数据，避免 limit 截断汇总）
 export function monthRangeISO(year, month) {
   const last = new Date(year, month, 0).getDate()

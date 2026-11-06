@@ -259,12 +259,20 @@ export function computeCashflow(params) {
 
   const expByDay = {}
   const expNames = {}
+  // 逐笔明细：每天到底是哪几笔、各多少钱。日历「当日明细」据此渲染，
+  // 不再把多个开支名字用顿号拼成一行让人猜。
+  const expItems = {}
   // 有「明确扣费日」的开支当天仍可能被对账逐笔核对，单独记下这些天
   const fixedExpDays = new Set()
   expenses.forEach((e) => {
     const d = clampDay(e.day)
     const amt = Number(e.amount) || 0
     const name = e.name || '固定开支'
+    const pushItem = (day, part, isSpread) => {
+      ;(expItems[day] = expItems[day] || []).push({
+        name, amount: round2(part), spread: isSpread
+      })
+    }
     if (e.spread === true && amt > 0) {
       // 按日均摊：以「分」为整数单位，余数补给前 N 天，全月合计精确等于原金额
       const cents = Math.round(amt * 100)
@@ -272,17 +280,21 @@ export function computeCashflow(params) {
       const remainder = cents - base * daysInMonth
       for (let day = 1; day <= daysInMonth; day++) {
         const c = base + (day <= remainder ? 1 : 0)
-        expByDay[day] = round2((expByDay[day] || 0) + c / 100)
+        const part = round2(c / 100)
+        expByDay[day] = round2((expByDay[day] || 0) + part)
         expNames[day] = expNames[day] ? `${expNames[day]}、${name}` : name
+        pushItem(day, part, true)
       }
       return
     }
     fixedExpDays.add(d)
     expByDay[d] = round2((expByDay[d] || 0) + amt)
     expNames[d] = expNames[d] ? `${expNames[d]}、${name}` : name
+    pushItem(d, amt, false)
   })
 
   const repayByDay = {}
+  const repayItems = {}
   const repayList = []
   repayments.forEach((r) => {
     const ds = String(r.date || '')
@@ -291,6 +303,7 @@ export function computeCashflow(params) {
     if (!Number.isFinite(d) || d < 1 || d > daysInMonth) return
     const amt = Number(r.amount) || 0
     repayByDay[d] = round2((repayByDay[d] || 0) + amt)
+    ;(repayItems[d] = repayItems[d] || []).push({ name: r.name || '还款', amount: amt, spread: false })
     repayList.push({ day: d, amount: amt, name: r.name || '还款' })
   })
 
@@ -318,12 +331,16 @@ export function computeCashflow(params) {
     const commonDelta = -outflow
 
     if (isPay) events.push({ day: d, type: 'pay', label: '发薪到账', amount: mainNet })
-    // spread 标记：按日均摊的日常零花不是一笔真实账单，对账时不逐笔匹配
+    // spread 标记：按日均摊的日常零花不是一笔真实账单，对账时不逐笔匹配。
+    // label 保留拼接串供图表 tooltip 与既有断言使用；items 供日历逐笔展开。
     if (expAmt) events.push({
       day: d, type: 'expense', label: expNames[d], amount: -expAmt,
-      spread: !fixedExpDays.has(d)
+      spread: !fixedExpDays.has(d), items: expItems[d] || []
     })
-    if (repayAmt) events.push({ day: d, type: 'repay', label: '还款扣款', amount: -repayAmt })
+    if (repayAmt) events.push({
+      day: d, type: 'repay', label: '还款扣款', amount: -repayAmt,
+      items: repayItems[d] || []
+    })
 
     scenarios.forEach((s) => {
       const prev = series[s.label].length ? series[s.label][series[s.label].length - 1] : startBalance

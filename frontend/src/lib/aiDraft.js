@@ -11,11 +11,22 @@
 //   4. 仍判不出给「其他」兜底，草稿永远可写。
 // ============================================================
 import { validateTransaction } from './validation'
-import { todayISO } from './date'
+import { todayISO, isValidISODate } from './date'
 
 const DIRECTION_MAP = { 收入: 'income', 支出: 'expense' }
 let seq = 0
 const uid = () => `draft-${Date.now()}-${++seq}`
+
+// 模型偶发给出离谱日期（实测曾返回 2023 年），写库前先做合理性兜底：
+// 只接受 [今天-31天, 今天+1天]，否则回退到今天并标记，供 UI 提示用户核对。
+function safeAiDate(value) {
+  const s = String(value ?? '').trim()
+  const today = todayISO()
+  if (!isValidISODate(s)) return { date: today, adjusted: true }
+  const diff = (new Date(`${s}T00:00:00`) - new Date(`${today}T00:00:00`)) / 86400000
+  if (!Number.isFinite(diff) || diff < -31 || diff > 1) return { date: today, adjusted: true }
+  return { date: s, adjusted: false }
+}
 
 // 默认分类清单：不再局限 8 类，覆盖更细的生活场景；用户可自由新增任意分类。
 // 前端会把「默认清单 + 你的常用分类」一起传给模型，服务端提示词不写死枚举。
@@ -115,6 +126,7 @@ export function makeBlankDraft() {
     direction: 'expense',
     category: '',
     originalCategory: '',
+    dateAdjusted: false,
     amount: null,
     note: '',
     source: 'manual',
@@ -133,9 +145,11 @@ export function normalizeAiResult(res, rawText = '', options = {}) {
   return list.map((p) => {
     // 一句话多笔时优先用「这一笔自己的备注」判类，避免整段原文把多笔串成同一类
     const hint = String(p?.note || '').trim() || String(rawText || '')
+    const { date, adjusted } = safeAiDate(p?.date || p?.txn_date)
     return {
       id: uid(),
-      txn_date: String(p?.date || p?.txn_date || todayISO()),
+      txn_date: date,
+      dateAdjusted: adjusted,
       direction: DIRECTION_MAP[p?.direction] || p?.direction || 'expense',
       category: normalizeCategory(p?.category, hint, { ...options, fromModel: true }),
       // 模型原始输出：用户改过分类时用来学习别名，不写入数据库

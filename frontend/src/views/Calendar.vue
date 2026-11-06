@@ -1,16 +1,23 @@
 <template>
   <div class="cal">
     <h2 class="page-title">现金流日历</h2>
-    <p class="muted">
-      按档案推演的逐日余额 · 发薪日与还款日已标注 ·
-      点任意一天看当天明细
+    <p class="muted lead">
+      这里算的是「每天结束时预计还剩多少钱」，不是你当天刷了多少钱。点任意一天，看这天到底会进账、扣掉哪几笔。
     </p>
+
+    <!-- 读法说明：把界面上三类数字一次讲清楚，避免把「余额」误读成「花费」 -->
+    <div class="read-hint">
+      <div class="rh-item"><b>格子里的数</b><span>当天结束时的预计余额</span></div>
+      <div class="rh-item"><b>下面的 + / −</b><span>这天净变化（到账 − 扣款）</span></div>
+      <div class="rh-item"><b>点某一天</b><span>逐笔列出「哪一笔、多少钱」</span></div>
+    </div>
+
     <div class="cal-note muted">
       <span>{{ spreadHint }}</span>
       <span v-if="monthProjection.rolled">
         本月期初 {{ formatMoney(monthProjection.startBalance) }}，由当前月逐月滚动得出，与仪表盘前瞻一致
       </span>
-      <span v-else class="note-warn">历史月份未接入实际流水，此处仅按档案推演，不作为真实结余</span>
+      <span v-else class="note-warn">{{ isCurrentMonth ? '本月按档案推演，未接入实际流水，不作为真实结余' : '历史月份未接入实际流水，此处仅按档案推演，不作为真实结余' }}</span>
       <span v-if="calendarIncomplete" class="note-warn">该年节假日数据尚未补全，日历属性按双休兜底</span>
     </div>
 
@@ -25,7 +32,7 @@
           <n-button v-if="!isCurrentMonth" size="small" tertiary @click="goToday">回到本月</n-button>
         </div>
         <div class="cal-mood" :class="'m-' + mood.level">
-          <span class="mood-dot" />
+          <Mascot :level="mood.level" :size="34" />
           <span>本月{{ mood.text }}</span>
           <span class="mood-sub">月末预计 {{ formatMoney(cf.monthEnd) }}</span>
         </div>
@@ -57,7 +64,14 @@
               >{{ dayTypeLabel[cell.dayType] }}</span>
               <span v-if="cell.day === todayDay && isCurrentMonth" class="today-pill">今</span>
             </div>
-            <div class="cal-balance">{{ formatMoney(cell.balance, false) }}</div>
+            <div class="cal-balance-row">
+              <span class="cal-balance-label">余额</span>
+              <b class="cal-balance">{{ formatMoney(cell.balance, false) }}</b>
+            </div>
+            <div class="cal-delta" :class="cell.delta > 0 ? 'd-up' : 'd-down'">
+              {{ cell.delta > 0 ? '+' : '' }}{{ formatMoney(cell.delta, false) }}
+              <span class="delta-word">今日</span>
+            </div>
             <div class="cal-marks">
               <span v-if="cell.isPay" class="mark mark-pay" title="发薪到账">薪</span>
               <span v-if="cell.isRepay" class="mark mark-rep" title="还款扣款">还</span>
@@ -66,33 +80,54 @@
         </div>
       </div>
 
-      <!-- 当日明细 -->
+      <!-- 当日明细：先用一条等式讲清「每天为什么变」，再逐笔列出到底是哪几笔 -->
       <div class="card day-detail">
         <div class="dd-head">
-          <b>{{ selectedLabel }}</b>
-          <span class="muted">{{ dayBalanceText }}</span>
+          <div>
+            <b>{{ selectedLabel }}</b>
+            <div class="dd-sub muted">{{ dayHeadline }}</div>
+          </div>
+          <span class="muted dd-bal">{{ dayBalanceText }}</span>
         </div>
-        <div v-if="selectedEvents.length" class="dd-list">
+
+        <div class="dd-equation">
+          <div class="eq-row"><span>上一天结束时</span><b>{{ formatMoney(prevBalance) }}</b></div>
+          <div class="eq-row eq-in"><span>这天到账</span><b>+ {{ formatMoney(dayIncome) }}</b></div>
+          <div class="eq-row eq-out"><span>这天扣掉</span><b>− {{ formatMoney(dayOutflow) }}</b></div>
+          <div class="eq-row eq-total">
+            <span>＝ 这天结束时</span>
+            <b :class="dayBalance < 0 ? 'text-danger' : 'text-success'">{{ formatMoney(dayBalance) }}</b>
+          </div>
+        </div>
+
+        <div class="dd-section-title">具体是哪几笔</div>
+        <div v-if="selectedItems.length" class="dd-list">
           <div
-            v-for="(e, i) in selectedEvents"
+            v-for="(it, i) in selectedItems"
             :key="i"
             class="dd-item"
-            :class="'ev-' + e.type"
+            :class="'ev-' + it.type"
             :style="{ '--i': i }"
           >
-            <span class="dd-tag">{{ evLabel[e.type] || '其他' }}</span>
-            <span class="dd-name">{{ e.label }}</span>
-            <b class="dd-amt" :class="e.amount >= 0 ? 'text-success' : 'text-danger'">
-              {{ e.amount >= 0 ? '+' : '' }}{{ formatMoney(e.amount) }}
+            <span class="dd-tag">{{ it.tag }}</span>
+            <span class="dd-name">
+              {{ it.name }}
+              <small v-if="it.note" class="dd-note">{{ it.note }}</small>
+            </span>
+            <b class="dd-amt" :class="it.amount >= 0 ? 'text-success' : 'text-danger'">
+              {{ it.amount >= 0 ? '+' : '' }}{{ formatMoney(it.amount) }}
             </b>
           </div>
         </div>
-        <div v-else class="muted dd-empty">这天没有收支记录（仅日常零花未记账）。</div>
+        <div v-else class="muted dd-empty">这天按档案推演没有固定收支：没到发薪 / 还款日，日常零花也没记账。</div>
+        <div class="dd-foot muted">
+          以上是按档案推演的预计金额，不是真实流水；标「均摊」的是月固定开支平摊到今天的份额，不是当天真实刷卡。
+        </div>
       </div>
 
       <div class="legend muted">
-        <span><i class="lg lg-pay" /> 发薪到账</span>
-        <span><i class="lg lg-rep" /> 还款扣款</span>
+        <span><i class="lg lg-pay" /> 发薪到账（余额增加）</span>
+        <span><i class="lg lg-rep" /> 还款扣款（余额减少）</span>
         <span><i class="lg lg-ok" /> 余额充足</span>
         <span><i class="lg lg-low" /> 偏紧</span>
         <span><i class="lg lg-neg" /> 转负</span>
@@ -111,8 +146,10 @@ import {
   readStartBalance, readRecurringRepayment, readExpenseSpreadMode
 } from '../lib/prefs'
 import { formatMoney } from '../lib/labels'
+import { round2 } from '../lib/validation'
 import { classifyDay } from '../lib/holidays2026'
 import { SAFETY_LINE } from '../lib/constants'
+import Mascot from '../components/Mascot.vue'
 
 const auth = useAuthStore()
 const app = useAppStore()
@@ -161,7 +198,12 @@ const spreadHint = computed(() => {
 })
 const calendarIncomplete = computed(() => viewYear.value > 2026)
 
-// 事件按天归类
+// 逐日数据与事件按天归类
+const dailyByDay = computed(() => {
+  const map = {}
+  cf.value.daily.forEach((x) => { map[x.day] = x })
+  return map
+})
 const eventsByDay = computed(() => {
   const map = {}
   cf.value.events.forEach((e) => {
@@ -170,7 +212,7 @@ const eventsByDay = computed(() => {
   return map
 })
 
-// 当月每日单元格
+// 当月每日单元格：余额 + 当天净变化，两个数都明确标注，避免误读成「今天花了多少」
 const cells = computed(() => {
   const y = viewYear.value
   const m = viewMonth.value
@@ -184,9 +226,11 @@ const cells = computed(() => {
   for (let i = 0; i < firstDow; i++) out.push(null)
   const ym = `${y}-${String(m).padStart(2, '0')}`
   for (let d = 1; d <= daysInMonth; d++) {
+    const row = dailyByDay.value[d] || {}
     out.push({
       day: d,
-      balance: (cf.value.daily.find((x) => x.day === d) || {}).balance ?? 0,
+      balance: row.balance ?? 0,
+      delta: round2((Number(row.income) || 0) - (Number(row.outflow) || 0)),
       dayType: classifyDay(`${ym}-${String(d).padStart(2, '0')}`),
       isPay: d === payDay,
       isRepay: repayDays.has(d)
@@ -209,13 +253,53 @@ const mood = computed(() => {
   return { text: '宽裕', level: 'ok' }
 })
 
-const selectedEvents = computed(() => eventsByDay.value[selectedDay.value] || [])
 const selectedLabel = computed(() =>
   `${viewYear.value} 年 ${viewMonth.value} 月 ${selectedDay.value} 日`
 )
-const dayBalanceText = computed(() => {
-  const b = (cf.value.daily.find((x) => x.day === selectedDay.value) || {}).balance
-  return b == null ? '' : `当天余额 ${formatMoney(b)}`
+const dayRow = computed(() => dailyByDay.value[selectedDay.value] || null)
+const dayIncome = computed(() => Number(dayRow.value?.income) || 0)
+const dayOutflow = computed(() => Number(dayRow.value?.outflow) || 0)
+const dayBalance = computed(() => dayRow.value?.balance ?? 0)
+const dayDelta = computed(() => round2(dayIncome.value - dayOutflow.value))
+const prevBalance = computed(() => selectedDay.value > 1
+  ? (dailyByDay.value[selectedDay.value - 1]?.balance ?? monthProjection.value.startBalance)
+  : monthProjection.value.startBalance
+)
+const dayBalanceText = computed(() =>
+  dayRow.value ? `当天余额 ${formatMoney(dayBalance.value)}` : ''
+)
+const dayHeadline = computed(() => {
+  if (!dayIncome.value && !dayOutflow.value) return '这天按档案推演没有固定收支，余额不变。'
+  const bits = []
+  if (dayIncome.value) bits.push(`到账 ${formatMoney(dayIncome.value)}`)
+  if (dayOutflow.value) bits.push(`扣掉 ${formatMoney(dayOutflow.value)}`)
+  return `这天${bits.join('，')}，所以余额${dayDelta.value >= 0 ? '增加' : '减少'} ${formatMoney(Math.abs(dayDelta.value))}。`
+})
+
+// 逐笔展开：引擎在 events[].items 里给出每笔名称与金额，
+// 不再把多个开支名字用顿号拼成一行让用户猜「到底是哪一笔」。
+const selectedItems = computed(() => {
+  const out = []
+  ;(eventsByDay.value[selectedDay.value] || []).forEach((e) => {
+    const items = Array.isArray(e.items) ? e.items : []
+    if (items.length) {
+      items.forEach((it) => out.push({
+        type: e.type,
+        tag: evLabel[e.type] || '其他',
+        name: it.name,
+        note: it.spread ? '均摊' : (e.type === 'repay' ? '账单当天扣款' : ''),
+        amount: e.type === 'pay'
+          ? Math.abs(Number(it.amount) || 0)
+          : -Math.abs(Number(it.amount) || 0)
+      }))
+    } else {
+      out.push({
+        type: e.type, tag: evLabel[e.type] || '其他',
+        name: e.label || '收支', note: '', amount: Number(e.amount) || 0
+      })
+    }
+  })
+  return out
 })
 
 function cellClass(cell) {
@@ -272,6 +356,19 @@ onUnmounted(() => {
 
 <style scoped>
 .page-title { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+.lead { font-size: 13px; line-height: 1.7; margin: 0; max-width: 820px; }
+.read-hint {
+  display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0 10px;
+}
+.rh-item {
+  flex: 1; min-width: 180px;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 9px 12px;
+  border: 1px solid var(--c-border); border-radius: var(--radius-sm);
+  background: var(--c-surface);
+}
+.rh-item b { font-size: 13px; color: var(--c-primary); }
+.rh-item span { font-size: 12px; color: var(--c-text-2); }
 .cal-note { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; padding: 8px 10px; border: 1px solid var(--c-border); border-radius: 8px; background: var(--c-surface); margin-top: 10px; }
 .note-warn { color: var(--c-warning-text); }
 .daytype { font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px; color: var(--c-text-2); background: var(--c-hover); flex-shrink: 0; }
@@ -281,22 +378,17 @@ onUnmounted(() => {
 .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 14px 0; }
 .cal-nav { display: flex; align-items: center; gap: 10px; }
 .cal-title { font-size: 16px; }
-.cal-mood { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; padding: 6px 12px; border-radius: 8px; }
-.mood-dot { width: 10px; height: 10px; border-radius: 50%; }
+.cal-mood { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; padding: 4px 12px 4px 4px; border-radius: 999px; }
 .mood-sub { font-size: 12px; font-weight: 400; color: var(--c-text-3); }
 .m-ok { color: var(--c-success); background: rgba(16,185,129,.12); }
-.m-ok .mood-dot { background: var(--c-success); }
 .m-mid { color: var(--c-primary); background: var(--c-primary-soft); }
-.m-mid .mood-dot { background: var(--c-primary); }
 .m-low { color: var(--c-warning-text); background: rgba(245,158,11,.16); }
-.m-low .mood-dot { background: var(--c-warning); }
 .m-neg { color: var(--c-danger); background: rgba(239,68,68,.12); }
-.m-neg .mood-dot { background: var(--c-danger); }
 
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
 .cal-week { margin-bottom: 6px; }
 .cal-weekname { text-align: center; font-size: 12px; color: var(--c-text-3); padding: 4px 0; }
-.cal-cell { min-height: 64px; }
+.cal-cell { min-height: 96px; }
 .cal-blank { min-height: 0; }
 /* 切月时格子按 --i 依次浮现；backwards 保证 hover 位移不被动画终态锁死 */
 .cal-grid .cal-cell {
@@ -309,8 +401,8 @@ onUnmounted(() => {
 }
 .cal-day {
   border: 1px solid var(--c-border);
-  border-radius: 8px;
-  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -324,13 +416,18 @@ onUnmounted(() => {
 .cal-day:hover { transform: translateY(-2px); border-color: var(--c-primary); }
 .cal-daynum { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
 .today-pill { background: var(--c-primary); color: #fff; font-size: 10px; padding: 0 4px; border-radius: 4px; }
-.cal-balance { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cal-balance-row { display: flex; align-items: baseline; gap: 5px; }
+.cal-balance-label { font-size: 10px; color: var(--c-text-3); flex-shrink: 0; }
+.cal-balance { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cal-delta { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--c-text-2); }
+.cal-delta.d-up { color: var(--c-success); }
+.delta-word { font-size: 10px; color: var(--c-text-3); margin-left: 3px; }
 .cal-marks { display: flex; gap: 4px; margin-top: auto; }
 .mark { font-size: 10px; line-height: 16px; width: 16px; height: 16px; text-align: center; border-radius: 4px; color: #fff; }
 .mark-pay { background: var(--c-success); }
 .mark-rep { background: var(--c-danger); }
 
-/* 余额健康度着色 */
+/* 余额健康度着色：只作用于余额数字，不再把「当天净变化」染红误导成花费 */
 .h-ok .cal-balance { color: var(--c-success); }
 .h-mid .cal-balance { color: var(--c-primary); }
 .h-low .cal-balance { color: var(--c-warning-text); }
@@ -339,8 +436,28 @@ onUnmounted(() => {
 .h-neg { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.35); }
 .is-selected { border-color: var(--c-primary); box-shadow: 0 0 0 2px var(--c-primary-soft); }
 
+/* 当日明细：等式卡 + 逐笔清单 */
 .day-detail { margin-top: 16px; }
-.dd-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.dd-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.dd-sub { font-size: 12px; line-height: 1.6; margin-top: 3px; }
+.dd-bal { font-size: 12px; white-space: nowrap; }
+.dd-equation {
+  border: 1px dashed var(--c-border); border-radius: var(--radius-sm);
+  background: var(--c-hover); padding: 10px 14px; margin-bottom: 16px;
+}
+.eq-row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-size: 13px; padding: 4px 0; color: var(--c-text-2);
+}
+.eq-row b { font-variant-numeric: tabular-nums; color: var(--c-text); }
+.eq-in b { color: var(--c-success); }
+.eq-out b { color: var(--c-danger); }
+.eq-total {
+  border-top: 1px solid var(--c-border); margin-top: 4px; padding-top: 9px;
+  font-weight: 600; color: var(--c-text);
+}
+.eq-total b { font-size: 16px; }
+.dd-section-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
 .dd-list { display: flex; flex-direction: column; gap: 8px; }
 .dd-item {
   display: flex; align-items: center; gap: 10px; font-size: 13px;
@@ -354,9 +471,11 @@ onUnmounted(() => {
 .dd-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; color: var(--c-text-2); background: var(--c-hover); flex-shrink: 0; }
 .ev-pay .dd-tag { color: var(--c-success); background: rgba(16,185,129,.12); }
 .ev-repay .dd-tag { color: var(--c-danger); background: rgba(239,68,68,.12); }
-.dd-name { flex: 1; color: var(--c-text-2); }
-.dd-amt { font-variant-numeric: tabular-nums; }
+.dd-name { flex: 1; color: var(--c-text-2); min-width: 0; }
+.dd-note { display: block; font-size: 11px; color: var(--c-text-3); margin-top: 2px; }
+.dd-amt { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dd-empty { padding: 6px 0; }
+.dd-foot { font-size: 11px; line-height: 1.7; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--c-border); }
 
 .legend { display: flex; gap: 16px; margin-top: 14px; font-size: 12px; flex-wrap: wrap; }
 .legend .lg { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
@@ -367,10 +486,13 @@ onUnmounted(() => {
 .lg-neg { background: var(--c-danger); }
 
 @media (max-width: 768px) {
-  .cal-cell { min-height: 52px; padding: 4px 5px; }
+  .cal-cell { min-height: 74px; padding: 5px 6px; }
   .cal-grid { gap: 5px; }
   .cal-balance { font-size: 11px; }
+  .cal-balance-label, .delta-word { display: none; }
+  .cal-delta { font-size: 10px; }
   .cal-daynum { font-size: 12px; }
   .mark { width: 14px; height: 14px; line-height: 14px; font-size: 9px; }
+  .rh-item { min-width: 100%; }
 }
 </style>

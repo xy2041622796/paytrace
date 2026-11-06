@@ -1185,5 +1185,208 @@ check('习惯学习链路：改过的分类能保留并正确记为别名', () =
   })
 })
 
+console.log('\n【AI 日期兜底】')
+
+check('模型返回离谱历史日期时回退到今天并标记', () => {
+  const items = aid.normalizeAiResult({
+    result: [{ date: '2023-10-06', direction: '支出', category: '餐饮', amount: 45 }]
+  })
+  assert.equal(items[0].txn_date, date.todayISO())
+  assert.equal(items[0].dateAdjusted, true)
+})
+
+check('近期合法日期保留，非法日期回退', () => {
+  const t = date.todayISO()
+  const ok = aid.normalizeAiResult({ result: [{ date: t, amount: 10 }] })
+  assert.equal(ok[0].txn_date, t)
+  assert.equal(ok[0].dateAdjusted, false)
+  const bad = aid.normalizeAiResult({ result: [{ date: '2026-02-30', amount: 10 }] })
+  assert.equal(bad[0].txn_date, t)
+  assert.equal(bad[0].dateAdjusted, true)
+})
+
+check('Edge Function 注入今天日期并强调逐笔不遗漏', () => {
+  const fn = readFileSync('../supabase/functions/agnes-proxy/index.ts', 'utf8')
+  assert.ok(fn.includes('今天日期（北京时间）'))
+  assert.ok(fn.includes('Asia/Shanghai'))
+  assert.ok(fn.includes('不要遗漏'))
+})
+
+check('日历当前月不再显示「历史月份」文案', () => {
+  const cal = readFileSync('src/views/Calendar.vue', 'utf8')
+  assert.match(cal, /isCurrentMonth \? '本月按档案推演/)
+})
+
+console.log('\n【看得懂的现金流】')
+
+check('每日事件带逐笔明细：金额合计等于当天支出，均摊项单独标记', () => {
+  const e = engine.computeCashflow({
+    startBalance: 1000, year: 2026, month: 11, payDay: 15,
+    scenarios: [{ label: '当前薪资', net: 4000 }], mainLabel: '当前薪资',
+    expenses: [
+      { day: 1, name: '房租', amount: 300, spread: false },
+      { day: 1, name: '话费', amount: 60, spread: false },
+      { day: 5, name: '餐饮', amount: 310, spread: true }
+    ],
+    repayments: [{ date: '2026-11-20', name: '白条', amount: 200 }]
+  })
+  const d1 = e.events.filter((x) => x.day === 1 && x.type === 'expense')[0]
+  const fixed = d1.items.filter((i) => !i.spread)
+  assert.deepEqual(fixed.map((i) => i.name), ['房租', '话费'])
+  assert.equal(fixed.reduce((s, i) => s + i.amount, 0), 360)
+  // 逐笔合计必须等于当天支出合计（含「餐饮」均摊到 1 号的那一份）
+  assert.ok(Math.abs(d1.items.reduce((s, i) => s + i.amount, 0) + d1.amount) < 0.001)
+  assert.equal(d1.items.filter((i) => i.spread).length, 1)
+  // 按日均摊：每天都有一笔带 spread 标记，单日金额接近月额 / 天数
+  const d5 = e.events.filter((x) => x.day === 5 && x.type === 'expense')[0]
+  assert.equal(d5.items[0].spread, true)
+  assert.ok(Math.abs(d5.items[0].amount - 310 / 30) < 0.01)
+  // 还款同样逐笔，不再只给一个「还款扣款」合计
+  const rp = e.events.filter((x) => x.day === 20 && x.type === 'repay')[0]
+  assert.equal(rp.items[0].name, '白条')
+  assert.equal(rp.items[0].amount, 200)
+})
+
+check('当前真实余额：可写入、带更新日期、按账号隔离且退出清理', () => {
+  withFakeStorage(() => {
+    prefsMod.setPrefScope('user-a')
+    assert.equal(prefsMod.readCurrentBalance().value, null)
+    prefsMod.writeCurrentBalance(1234.56)
+    const a = prefsMod.readCurrentBalance()
+    assert.equal(a.value, 1234.56)
+    assert.match(a.updatedAt, /^\d{4}-\d{2}-\d{2}$/)
+    prefsMod.setPrefScope('user-b')
+    assert.equal(prefsMod.readCurrentBalance().value, null)
+    prefsMod.setPrefScope('user-a')
+    assert.equal(prefsMod.readCurrentBalance().value, 1234.56)
+    prefsMod.clearPrefs()
+    assert.equal(prefsMod.readCurrentBalance().value, null)
+  })
+})
+
+check('首页展示「现在还剩多少」且与推演值分开，支持一键设为期初', () => {
+  const dash = readFileSync('src/views/Dashboard.vue', 'utf8')
+  assert.match(dash, /readCurrentBalance/)
+  assert.match(dash, /writeCurrentBalance/)
+  assert.match(dash, /现在还剩/)
+  assert.match(dash, /真实余额/)
+  assert.match(dash, /设为推演期初/)
+  assert.match(dash, /syncToStart/)
+  assert.match(dash, /推演值/)
+  assert.match(dash, /Mascot/)
+})
+
+check('现金流日历：标清「余额 / 今日净变化」，逐笔列出每笔金额与等式', () => {
+  const cal = readFileSync('src/views/Calendar.vue', 'utf8')
+  assert.match(cal, /当天结束时的预计余额/)
+  assert.match(cal, /cal-balance-label/)
+  assert.match(cal, /cal-delta/)
+  assert.match(cal, /selectedItems/)
+  assert.match(cal, /e\.items/)
+  assert.match(cal, /dd-equation/)
+  assert.match(cal, /具体是哪几笔/)
+  // 不再把多个开支名拼成一行直接展示给用户
+  assert.doesNotMatch(cal, /\{\{ e\.label \}\}/)
+})
+
+check('状态伙伴为纯 SVG 图形，按余额状态切换表情且不使用 emoji', () => {
+  const m = readFileSync('src/components/Mascot.vue', 'utf8')
+  assert.match(m, /<svg/)
+  assert.match(m, /level === 'neg'/)
+  assert.match(m, /level === 'ok'/)
+  assert.doesNotMatch(m, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)
+})
+
+check('宽屏阅读宽度收敛，趣味卡片使用圆角 token', () => {
+  const t = readFileSync('src/styles/theme.css', 'utf8')
+  assert.match(t, /--radius-lg/)
+  assert.match(t, /main\.content > \* \{ max-width: 1240px/)
+})
+
+console.log('\n【余额变动台账】')
+
+check('首次写入建立基线：不编造旧值，台账与余额一次写入且一致', () => {
+  withFakeStorage(() => {
+    prefsMod.setPrefScope('user-t')
+    const rec = prefsMod.writeCurrentBalance(72, { reason: '用户口述当前余额' })
+    assert.equal(rec.kind, 'baseline')
+    assert.equal(rec.from, null)
+    assert.equal(rec.delta, null)
+    assert.equal(rec.to, 72)
+    assert.match(rec.at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+    assert.equal(rec.date, date.todayISO())
+    assert.equal(rec.reason, '用户口述当前余额')
+    const cur = prefsMod.readCurrentBalance()
+    assert.equal(cur.value, 72)
+    assert.equal(cur.log.length, 1)
+    const v = prefsMod.verifyBalanceLog()
+    assert.equal(v.count, 1)
+    assert.equal(v.consistent, true)
+    assert.equal(v.chainOk, true)
+  })
+})
+
+check('连续变动：差额按「分」精确计算，链条前后衔接', () => {
+  withFakeStorage(() => {
+    prefsMod.setPrefScope('user-t')
+    prefsMod.writeCurrentBalance(0.1, { reason: '起始' })
+    const r2 = prefsMod.writeCurrentBalance(0.3, { reason: '存入' })
+    assert.equal(r2.kind, 'update')
+    assert.equal(r2.from, 0.1)
+    assert.equal(r2.to, 0.3)
+    assert.equal(r2.delta, 0.2)            // 0.3 - 0.1 必须精确等于 0.2
+    const r3 = prefsMod.writeCurrentBalance(-15.25, { reason: '透支' })
+    assert.equal(r3.delta, -15.55)         // -15.25 - 0.3
+    const v = prefsMod.verifyBalanceLog()
+    assert.equal(v.count, 3)
+    assert.equal(v.chainOk, true)
+    assert.equal(v.consistent, true)
+    assert.equal(v.latest, -15.25)
+    assert.equal(prefsMod.readCurrentBalance().value, -15.25)
+  })
+})
+
+check('台账 append-only：旧记录不被改写，非法金额拒绝写入', () => {
+  withFakeStorage(() => {
+    prefsMod.setPrefScope('user-t')
+    prefsMod.writeCurrentBalance(100, { reason: 'A' })
+    const before = JSON.stringify(prefsMod.readBalanceLog())
+    prefsMod.writeCurrentBalance(NaN)
+    assert.equal(JSON.stringify(prefsMod.readBalanceLog()), before)
+    assert.equal(prefsMod.readCurrentBalance().value, 100)
+    prefsMod.writeCurrentBalance(80, { reason: 'B' })
+    const log = prefsMod.readBalanceLog()
+    assert.equal(log.length, 2)
+    assert.equal(log[0].reason, 'A')
+    assert.equal(log[1].reason, 'B')
+  })
+})
+
+check('台账按账号隔离，退出清理后不带到下一位', () => {
+  withFakeStorage(() => {
+    prefsMod.setPrefScope('user-t')
+    prefsMod.writeCurrentBalance(72, { reason: '甲' })
+    prefsMod.setPrefScope('user-u')
+    assert.deepEqual(prefsMod.readBalanceLog(), [])
+    assert.equal(prefsMod.readCurrentBalance().value, null)
+    prefsMod.setPrefScope('user-t')
+    assert.equal(prefsMod.readBalanceLog().length, 1)
+    prefsMod.clearPrefs()
+    assert.deepEqual(prefsMod.readBalanceLog(), [])
+  })
+})
+
+check('首页接入：变更备注、台账展示、无变动不记假账', () => {
+  const dash = readFileSync('src/views/Dashboard.vue', 'utf8')
+  assert.match(dash, /balanceReason/)
+  assert.match(dash, /writeCurrentBalance\(next, /)
+  assert.match(dash, /reason: balanceReason\.value/)
+  assert.match(dash, /readBalanceLog/)
+  assert.match(dash, /verifyBalanceLog/)
+  assert.match(dash, /余额变动记录/)
+  assert.match(dash, /核对一致/)
+  assert.match(dash, /没有产生变动，未记新账/)
+})
+
 console.log(`\n结果：通过 ${passed} 项，失败 ${failed} 项\n`)
 if (failed > 0) process.exitCode = 1

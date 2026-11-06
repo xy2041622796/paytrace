@@ -7,6 +7,81 @@
       发薪日：每月 {{ cf.effPayDay }} 日（当天到账，遇周末照发） ·
       固定双休
     </p>
+
+    <!-- 首屏：「现在还剩多少」。真实余额由用户维护，与推演值严格分开摆放 -->
+    <div class="hero card">
+      <div class="hero-main">
+        <Mascot :level="balanceLevel" :size="88" />
+        <div class="hero-text">
+          <div class="hero-kicker">
+            现在还剩
+            <span class="hero-badge">真实余额 · 你说了算</span>
+          </div>
+          <div v-if="!editingBalance" class="hero-amount">
+            <span v-if="currentBalance.value == null" class="hero-empty">还没填过</span>
+            <template v-else>{{ formatMoney(currentBalance.value, false) }}<span class="hero-unit">元</span></template>
+          </div>
+          <div v-else class="hero-edit">
+            <n-input-number v-model:value="balanceDraft" size="small" style="width:150px" />
+            <n-input
+              v-model:value="balanceReason" size="small" style="width:250px"
+              placeholder="这次为什么变？（如：发工资 / 交房租 / 买菜）"
+            />
+            <n-button size="small" type="primary" @click="saveBalance">保存</n-button>
+            <n-button size="small" quaternary @click="editingBalance = false">取消</n-button>
+          </div>
+          <div class="hero-line">{{ heroLine }}</div>
+          <div v-if="currentBalance.updatedAt" class="hero-updated muted">上次更新 {{ currentBalance.updatedAt }}</div>
+        </div>
+        <div class="hero-actions">
+          <n-button v-if="!editingBalance" size="small" type="primary" @click="startEditBalance">更新余额</n-button>
+          <n-button size="small" tertiary :disabled="currentBalance.value == null" @click="syncToStart">设为推演期初</n-button>
+        </div>
+      </div>
+      <div class="hero-compare">
+        <div class="hc-note">
+          下面的「月末预计 / 月内最低」是<b>推演值</b>，不是你手里的钱。<br />
+          想让预测贴近现实，点一下「设为推演期初」。
+        </div>
+      </div>
+    </div>
+
+    <!-- 余额变动台账：每一次金额变化都留痕，可逐条核对 -->
+    <div class="card log-card">
+      <div class="log-head" @click="showLog = !showLog">
+        <b>余额变动记录</b>
+        <span class="muted">共 {{ balanceLog.length }} 条 · 每次变动都留痕</span>
+        <span class="log-check" :class="logCheck.count === 0 ? 'is-pending' : (logCheck.chainOk && logCheck.consistent ? 'is-ok' : 'is-bad')">
+          {{ logCheck.count === 0 ? '待建立基线' : (logCheck.chainOk && logCheck.consistent ? '核对一致' : '核对异常') }}
+        </span>
+        <span class="log-toggle">{{ showLog ? '收起' : '展开' }}</span>
+      </div>
+      <div v-if="showLog" class="log-body">
+        <div v-if="!logRows.length" class="muted log-empty">还没有记录。第一次更新余额时会建立基线。</div>
+        <div v-for="r in logRows" :key="r.id" class="log-row">
+          <span class="log-at">{{ r.at }}</span>
+          <span class="log-kind" :class="'k-' + r.kind">{{ kindLabel[r.kind] || '变动' }}</span>
+          <span class="log-change">
+            <template v-if="r.from == null">
+              起始金额 <b>{{ formatMoney(r.to) }}</b>
+            </template>
+            <template v-else>
+              {{ formatMoney(r.from) }} → <b>{{ formatMoney(r.to) }}</b>
+              <em :class="r.delta < 0 ? 'text-danger' : 'text-success'">
+                {{ r.delta >= 0 ? '+' : '' }}{{ formatMoney(r.delta) }}
+              </em>
+            </template>
+          </span>
+          <span class="log-reason">{{ r.reason }}</span>
+        </div>
+        <div class="log-foot muted">
+          当前显示 {{ currentBalance.value == null ? '—' : formatMoney(currentBalance.value) }} ·
+          台账最新 {{ logCheck.latest == null ? '—' : formatMoney(logCheck.latest) }} ·
+          {{ logCheck.count === 0 ? '尚无基线记录' : (logCheck.consistent ? '两者一致' : '不一致，请检查') }}；金额按「分」计算，差额逐条可核对。
+        </div>
+      </div>
+    </div>
+
     <div class="cache-bar">
       <span class="muted">档案更新于 {{ cacheTime }}（本地缓存 12 小时）</span>
       <span v-if="refreshing" class="refresh-dot is-spinning" aria-hidden="true" />
@@ -35,10 +110,13 @@
       <div class="muted">到期前 3 天、1 天与当天在此提醒；还完请到「档案配置 → 还款日历」标记已还。</div>
     </n-alert>
 
-    <!-- 核心：期初余额（推演基准，常驻） -->
+    <!-- 推演起点：模型从月初 1 号起算用的假设值，与首屏「现在还剩」是两个概念 -->
     <div class="card core-config">
-      <div class="field-label">期初余额（元）· 仪表盘与月度对账共用同一个值</div>
-      <n-input-number v-model:value="startBalance" :min="0" size="small" style="width:160px" />
+      <div class="field-label">推演起点 · 期初余额（月初 1 号的假设值，不是你现在手里的钱）</div>
+      <div class="core-row">
+        <n-input-number v-model:value="startBalance" :min="0" size="small" style="width:160px" />
+        <span class="muted core-hint">下面的预测都从这个数开始算；想用真实余额，点首屏「设为推演期初」。</span>
+      </div>
     </div>
 
     <!-- 核心指标：一眼可见的最重要的四个数 -->
@@ -233,15 +311,18 @@ import { useAuthStore } from '../stores/auth'
 import { useAppStore } from '../stores/app'
 import { buildProjection } from '../composables/useProjection'
 import CashflowTimeline from '../components/CashflowTimeline.vue'
+import Mascot from '../components/Mascot.vue'
 import {
   RISK_LEVEL_LABEL as levelLabel, formatMoney, formatDateTimeCN
 } from '../lib/labels'
 import {
   readPref, writePref, migrateLegacy, readStartBalance, writeStartBalance,
-  readExpenseSpreadMode
+  readExpenseSpreadMode, readCurrentBalance, writeCurrentBalance,
+  readBalanceLog, verifyBalanceLog
 } from '../lib/prefs'
 import { round2 } from '../lib/validation'
 import { todayISO } from '../lib/date'
+import { SAFETY_LINE } from '../lib/constants'
 
 const message = useMessage()
 const auth = useAuthStore()
@@ -260,6 +341,67 @@ const recurringRepayment = ref(
 const bonusEnabled = ref(readPref('scenarioBonusEnabled', false))
 const scenarioBonus = ref(Number(readPref('scenarioBonus', 0)) || 0)
 
+// 「现在还剩多少」：真实余额，与期初/推演余额分开存放。
+// 用户口述金额时，由 Agent 通过「更新余额」输入框写入；跨标签同步靠偏好事件。
+const currentBalance = ref(readCurrentBalance())
+const editingBalance = ref(false)
+const balanceDraft = ref(0)
+const balanceReason = ref('')
+const showLog = ref(true)
+const balanceLog = ref(readBalanceLog())
+const logCheck = ref(verifyBalanceLog())
+const kindLabel = { baseline: '建立基线', update: '余额变动', sync: '同步' }
+const logRows = computed(() => balanceLog.value.slice().reverse())
+function refreshBalanceLog() {
+  balanceLog.value = readBalanceLog()
+  logCheck.value = verifyBalanceLog()
+}
+const balanceLevel = computed(() => {
+  const v = currentBalance.value.value
+  if (v == null) return 'mid'
+  if (v < 0) return 'neg'
+  if (v < SAFETY_LINE) return 'low'
+  if (v < 2000) return 'mid'
+  return 'ok'
+})
+const heroLine = computed(() => {
+  const v = currentBalance.value.value
+  if (v == null) return '点「更新余额」告诉我你现在手里有多少钱；以后直接跟我说个数就行。'
+  if (v < 0) return '已经透支了，先看看哪笔支出能往后挪一挪。'
+  if (v < SAFETY_LINE) return '有点紧，大额消费先缓一缓，撑到发薪日。'
+  if (v < 2000) return '够用，不过离舒服的安全垫还差一点。'
+  return '手里挺宽裕，按现在的节奏能稳稳撑住。'
+})
+function startEditBalance() {
+  balanceDraft.value = currentBalance.value.value ?? 0
+  balanceReason.value = ''
+  editingBalance.value = true
+}
+function saveBalance() {
+  const next = Number(balanceDraft.value)
+  if (!Number.isFinite(next)) return message.error('请输入有效金额')
+  const prev = currentBalance.value.value
+  // 金额没变就不制造一条假变动：既保持台账干净，也避免误记
+  if (prev != null && Math.round(prev * 100) === Math.round(next * 100)) {
+    editingBalance.value = false
+    return message.info('金额和之前一样，没有产生变动，未记新账')
+  }
+  writeCurrentBalance(next, { reason: balanceReason.value })
+  currentBalance.value = readCurrentBalance()
+  refreshBalanceLog()
+  editingBalance.value = false
+  balanceReason.value = ''
+  message.success('已记下余额，并写入变动记录')
+}
+// 只把余额同步为推演起点，余额本身没变，台账不记（台账只记录真实金额变动）
+function syncToStart() {
+  const v = currentBalance.value.value
+  if (v == null) return
+  writeStartBalance(v)
+  startBalance.value = v
+  message.success('已把当前余额设为推演期初')
+}
+
 // 本机偏好变更后，让推演立即重算（同页自定义事件 + 跨标签页 storage）
 const prefRevision = ref(0)
 const onPrefChange = () => {
@@ -267,6 +409,9 @@ const onPrefChange = () => {
   // 账本页或另一个标签页改了期初余额，这里同步，保证两处推演基准一致
   const shared = readStartBalance()
   if (Math.abs(shared - Number(startBalance.value)) > 0.001) startBalance.value = shared
+  // 另一个标签页更新了「现在还剩多少」，首屏与台账都要跟着变
+  currentBalance.value = readCurrentBalance()
+  refreshBalanceLog()
 }
 
 const now = new Date()
@@ -430,6 +575,8 @@ onBeforeUnmount(() => {
   to   { opacity: 1; transform: translateY(0); }
 }
 .core-config { margin: 14px 0; }
+.core-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.core-hint { font-size: 12px; line-height: 1.6; }
 .config-row { display: flex; gap: 24px; margin: 6px 0; flex-wrap: wrap; align-items: flex-end; }
 .cfg-item { display: flex; flex-direction: column; gap: 6px; }
 .ro { font-size: 16px; font-weight: 600; padding: 2px 0; }
@@ -524,6 +671,80 @@ onBeforeUnmount(() => {
 .fc-row b { color: var(--c-text); font-weight: 600; }
 .fc-note { margin-top: 6px; font-size: 11px; color: var(--c-danger); }
 .tip { font-size: 12px; margin-top: 14px; }
+
+/* 余额变动台账 */
+.log-card { margin: 0 0 14px; padding: 14px 18px; }
+.log-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; cursor: pointer; font-size: 13px; }
+.log-head b { font-size: 14px; }
+.log-head .muted { font-size: 12px; }
+.log-check { font-size: 11px; padding: 2px 9px; border-radius: 999px; }
+.log-check.is-ok { color: var(--c-success); background: rgba(16,185,129,.12); }
+.log-check.is-bad { color: var(--c-danger); background: rgba(239,68,68,.12); }
+.log-check.is-pending { color: var(--c-warning-text); background: rgba(245,158,11,.16); }
+.log-toggle { margin-left: auto; font-size: 12px; color: var(--c-primary); }
+.log-body { margin-top: 12px; border-top: 1px solid var(--c-border); padding-top: 10px; }
+.log-empty { font-size: 12px; padding: 6px 0; }
+.log-row {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  font-size: 12px; padding: 7px 0; border-bottom: 1px dashed var(--c-border);
+  font-variant-numeric: tabular-nums;
+}
+.log-at { color: var(--c-text-3); white-space: nowrap; }
+.log-kind { font-size: 11px; padding: 1px 7px; border-radius: 4px; color: var(--c-text-2); background: var(--c-hover); white-space: nowrap; }
+.log-kind.k-baseline { color: var(--c-primary); background: var(--c-primary-soft); }
+.log-change { color: var(--c-text-2); }
+.log-change b { color: var(--c-text); }
+.log-change em { font-style: normal; margin-left: 6px; font-weight: 600; }
+.log-reason { color: var(--c-text-2); flex: 1; min-width: 160px; }
+.log-foot { font-size: 11px; line-height: 1.7; margin-top: 10px; }
+@media (max-width: 768px) {
+  .log-card { padding: 12px; }
+  .log-toggle { margin-left: 0; }
+}
+
+/* 首屏「现在还剩多少」：圆润底色 + 状态伙伴 + 预测对照 */
+.hero {
+  margin: 16px 0 14px;
+  padding: 18px 20px;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 88% -20%, var(--c-primary-soft) 0%, transparent 55%),
+    var(--c-surface);
+  overflow: hidden;
+}
+.hero-main { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.hero-text { flex: 1; min-width: 220px; }
+.hero-kicker { font-size: 13px; color: var(--c-text-2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hero-badge {
+  font-size: 11px; padding: 2px 9px; border-radius: 999px;
+  color: var(--c-primary); background: var(--c-primary-soft);
+}
+.hero-amount {
+  font-size: 40px; font-weight: 700; line-height: 1.25;
+  font-variant-numeric: tabular-nums; letter-spacing: -.5px;
+  animation: pop-in var(--dur-slow) var(--ease-out) backwards;
+}
+.hero-unit { font-size: 15px; font-weight: 500; color: var(--c-text-3); margin-left: 6px; }
+.hero-empty { font-size: 26px; font-weight: 600; color: var(--c-text-3); }
+.hero-edit { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+.hero-line { font-size: 13px; color: var(--c-text-2); margin-top: 2px; }
+.hero-updated { font-size: 11px; margin-top: 4px; }
+.hero-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+.hero-compare {
+  display: flex; gap: 26px; flex-wrap: wrap; align-items: center;
+  margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--c-border);
+}
+.hc-item { display: flex; flex-direction: column; gap: 2px; }
+.hc-item span { font-size: 12px; color: var(--c-text-3); }
+.hc-item b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.hc-item small { font-size: 11px; color: var(--c-text-3); }
+.hc-note { font-size: 12px; color: var(--c-text-3); line-height: 1.7; }
+@media (max-width: 768px) {
+  .hero { padding: 14px; }
+  .hero-amount { font-size: 32px; }
+  .hero-actions { flex-direction: row; }
+  .hc-note { margin-left: 0; }
+}
 
 @media (max-width: 900px) {
   .stats { grid-template-columns: repeat(2, 1fr); }
