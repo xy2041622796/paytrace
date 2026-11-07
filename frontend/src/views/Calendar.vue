@@ -1,12 +1,10 @@
 <template>
-  <div class="cal">
-    <h2 class="page-title">现金流日历</h2>
-    <p class="muted lead">
-      这里算的是「每天结束时预计还剩多少钱」，不是你当天刷了多少钱。点任意一天，看这天到底会进账、扣掉哪几笔。
-    </p>
+  <div class="cal pt-page">
+    <PageHeader eyebrow="概览" title="现金流日历" desc="这里算的是「每天结束时预计还剩多少钱」，不是你当天刷了多少钱。点任意一天，看这天到底会进账、扣掉哪几笔。" />
 
     <!-- 读法说明：把界面上三类数字一次讲清楚，避免把「余额」误读成「花费」 -->
-    <div class="read-hint">
+    <div class="pt-section-label">读法说明</div>
+    <div class="read-hint pt-grid-3">
       <div class="rh-item"><b>格子里的数</b><span>当天结束时的预计余额</span></div>
       <div class="rh-item"><b>下面的 + / −</b><span>这天净变化（到账 − 扣款）</span></div>
       <div class="rh-item"><b>点某一天</b><span>逐笔列出「哪一笔、多少钱」</span></div>
@@ -24,7 +22,7 @@
     <div v-if="loading" class="muted">正在加载档案…</div>
     <div v-else class="cal-body">
       <!-- 月份切换 + 本月心情 -->
-      <div class="cal-head">
+      <div class="cal-head pt-row pt-row--between">
         <div class="cal-nav">
           <n-button size="small" quaternary @click="prevMonth">‹ 上月</n-button>
           <b class="cal-title">{{ viewYear }} 年 {{ viewMonth }} 月</b>
@@ -81,7 +79,7 @@
       </div>
 
       <!-- 当日明细：先用一条等式讲清「每天为什么变」，再逐笔列出到底是哪几笔 -->
-      <div class="card day-detail">
+      <SectionCard class="day-detail" title="当日明细" icon="listCheck">
         <div class="dd-head">
           <div>
             <b>{{ selectedLabel }}</b>
@@ -105,7 +103,7 @@
           <div
             v-for="(it, i) in selectedItems"
             :key="i"
-            class="dd-item"
+            class="dd-item stagger-in"
             :class="'ev-' + it.type"
             :style="{ '--i': i }"
           >
@@ -119,18 +117,18 @@
             </b>
           </div>
         </div>
-        <div v-else class="muted dd-empty">这天按档案推演没有固定收支：没到发薪 / 还款日，日常零花也没记账。</div>
+        <EmptyState v-else text="这天按档案推演没有固定收支：没到发薪 / 还款日，日常零花也没记账。" icon="inbox" />
         <div class="dd-foot muted">
           以上是按档案推演的预计金额，不是真实流水；标「均摊」的是月固定开支平摊到今天的份额，不是当天真实刷卡。
         </div>
-      </div>
+      </SectionCard>
 
-      <div class="legend muted">
-        <span><i class="lg lg-pay" /> 发薪到账（余额增加）</span>
-        <span><i class="lg lg-rep" /> 还款扣款（余额减少）</span>
-        <span><i class="lg lg-ok" /> 余额充足</span>
-        <span><i class="lg lg-low" /> 偏紧</span>
-        <span><i class="lg lg-neg" /> 转负</span>
+      <div class="pt-legend">
+        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--success" /> 发薪到账（余额增加）</span>
+        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--danger" /> 还款扣款（余额减少）</span>
+        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--success" /> 余额充足</span>
+        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--warning" /> 偏紧</span>
+        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--danger" /> 转负</span>
       </div>
     </div>
   </div>
@@ -355,41 +353,45 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
-.lead { font-size: 13px; line-height: 1.7; margin: 0; max-width: 820px; }
-.read-hint {
-  display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0 10px;
-}
+/* 读法说明：三卡分组 */
+.read-hint { margin: 0 0 12px; }
 .rh-item {
-  flex: 1; min-width: 180px;
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 9px 12px;
-  border: 1px solid var(--c-border); border-radius: var(--radius-sm);
-  background: var(--c-surface);
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
 }
 .rh-item b { font-size: 13px; color: var(--c-primary); }
-.rh-item span { font-size: 12px; color: var(--c-text-2); }
-.cal-note { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; padding: 8px 10px; border: 1px solid var(--c-border); border-radius: 8px; background: var(--c-surface); margin-top: 10px; }
-.note-warn { color: var(--c-warning-text); }
-.daytype { font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px; color: var(--c-text-2); background: var(--c-hover); flex-shrink: 0; }
-.dt-legal { color: var(--c-danger); background: rgba(239,68,68,.12); }
-.dt-makeup { color: var(--c-warning-text); background: rgba(245,158,11,.16); }
-.dt-weekend { color: var(--c-text-3); background: var(--c-hover); }
-.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 14px 0; }
-.cal-nav { display: flex; align-items: center; gap: 10px; }
-.cal-title { font-size: 16px; }
-.cal-mood { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; padding: 4px 12px 4px 4px; border-radius: 999px; }
-.mood-sub { font-size: 12px; font-weight: 400; color: var(--c-text-3); }
-.m-ok { color: var(--c-success); background: rgba(16,185,129,.12); }
-.m-mid { color: var(--c-primary); background: var(--c-primary-soft); }
-.m-low { color: var(--c-warning-text); background: rgba(245,158,11,.16); }
-.m-neg { color: var(--c-danger); background: rgba(239,68,68,.12); }
+.rh-item span { font-size: 12px; color: var(--c-text-2); line-height: 1.6; }
 
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+/* 口径提示条 */
+.cal-note { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; padding: 8px 10px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-2); margin-top: 10px; line-height: 1.7; }
+.note-warn { color: var(--c-warning-text); }
+
+/* 月份切换 + 心情 */
+.cal-head { margin: 14px 0; }
+.cal-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cal-title { font-size: 16px; }
+.cal-mood { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; padding: 4px 12px 4px 4px; border-radius: var(--r-pill); flex-wrap: wrap; }
+.mood-sub { font-size: 12px; font-weight: 400; color: var(--c-text-3); }
+.m-ok { color: var(--c-success); background: var(--c-success-soft); }
+.m-mid { color: var(--c-primary); background: var(--c-primary-soft); }
+.m-low { color: var(--c-warning-text); background: var(--c-warning-soft); }
+.m-neg { color: var(--c-danger); background: var(--c-danger-soft); }
+
+/* 日历网格 */
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
 .cal-week { margin-bottom: 6px; }
 .cal-weekname { text-align: center; font-size: 12px; color: var(--c-text-3); padding: 4px 0; }
 .cal-cell { min-height: 96px; }
-.cal-blank { min-height: 0; }
+/* 首周空白格：淡占位，补齐网格、消除视觉断裂 */
+.cal-blank, .cal-cell:empty {
+  min-height: 96px;
+  border: 1px dashed var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+}
 /* 切月时格子按 --i 依次浮现；backwards 保证 hover 位移不被动画终态锁死 */
 .cal-grid .cal-cell {
   animation: cal-cell-in 320ms var(--ease-out) backwards;
@@ -404,9 +406,7 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   padding: 7px 9px;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: flex; flex-direction: column; gap: 3px;
   background: var(--c-surface);
   transition: transform var(--dur-fast) var(--ease-out),
               border-color var(--dur-fast) ease,
@@ -414,85 +414,68 @@ onUnmounted(() => {
               background-color var(--dur-base) ease;
 }
 .cal-day:hover { transform: translateY(-2px); border-color: var(--c-primary); }
-.cal-daynum { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
-.today-pill { background: var(--c-primary); color: #fff; font-size: 10px; padding: 0 4px; border-radius: 4px; }
+.cal-daynum { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.daytype { font-size: 10px; line-height: 14px; padding: 0 4px; border-radius: 3px; color: var(--c-text-2); background: var(--c-hover); flex-shrink: 0; }
+.dt-legal { color: var(--c-danger); background: var(--c-danger-soft); }
+.dt-makeup { color: var(--c-warning-text); background: var(--c-warning-soft); }
+.dt-weekend { color: var(--c-text-3); background: var(--c-hover); }
+.today-pill { background: var(--c-primary); color: var(--c-surface); font-size: 10px; padding: 0 4px; border-radius: 4px; }
 .cal-balance-row { display: flex; align-items: baseline; gap: 5px; }
 .cal-balance-label { font-size: 10px; color: var(--c-text-3); flex-shrink: 0; }
-.cal-balance { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.cal-delta { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--c-text-2); }
+.cal-balance { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.cal-delta { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--c-text-2); }
 .cal-delta.d-up { color: var(--c-success); }
-.delta-word { font-size: 10px; color: var(--c-text-3); margin-left: 3px; }
+.delta-word { font-size: 10px; font-weight: 400; color: var(--c-text-3); margin-left: 3px; }
 .cal-marks { display: flex; gap: 4px; margin-top: auto; }
-.mark { font-size: 10px; line-height: 16px; width: 16px; height: 16px; text-align: center; border-radius: 4px; color: #fff; }
+.mark { font-size: 10px; line-height: 16px; width: 16px; height: 16px; text-align: center; border-radius: 4px; color: var(--c-surface); }
 .mark-pay { background: var(--c-success); }
 .mark-rep { background: var(--c-danger); }
 
-/* 余额健康度着色：只作用于余额数字，不再把「当天净变化」染红误导成花费 */
+/* 余额健康度：只给余额数字着色，不再把净变化染红误导成花费 */
 .h-ok .cal-balance { color: var(--c-success); }
 .h-mid .cal-balance { color: var(--c-primary); }
 .h-low .cal-balance { color: var(--c-warning-text); }
-.h-low { background: rgba(245,158,11,.06); }
+.h-low { background: var(--c-warning-soft); }
 .h-neg .cal-balance { color: var(--c-danger); }
-.h-neg { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.35); }
+.h-neg { background: var(--c-danger-soft); border-color: var(--c-danger); }
 .is-selected { border-color: var(--c-primary); box-shadow: 0 0 0 2px var(--c-primary-soft); }
 
-/* 当日明细：等式卡 + 逐笔清单 */
+/* 当日明细：等式卡 + 逐笔清单（交错入场交给全局 .stagger-in + --i） */
 .day-detail { margin-top: 16px; }
 .dd-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .dd-sub { font-size: 12px; line-height: 1.6; margin-top: 3px; }
 .dd-bal { font-size: 12px; white-space: nowrap; }
 .dd-equation {
   border: 1px dashed var(--c-border); border-radius: var(--radius-sm);
-  background: var(--c-hover); padding: 10px 14px; margin-bottom: 16px;
+  background: var(--c-surface-2); padding: 10px 14px; margin-bottom: 16px;
 }
-.eq-row {
-  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
-  font-size: 13px; padding: 4px 0; color: var(--c-text-2);
-}
+.eq-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; padding: 4px 0; color: var(--c-text-2); }
 .eq-row b { font-variant-numeric: tabular-nums; color: var(--c-text); }
 .eq-in b { color: var(--c-success); }
 .eq-out b { color: var(--c-danger); }
-.eq-total {
-  border-top: 1px solid var(--c-border); margin-top: 4px; padding-top: 9px;
-  font-weight: 600; color: var(--c-text);
-}
+.eq-total { border-top: 1px solid var(--c-border); margin-top: 4px; padding-top: 9px; font-weight: 600; color: var(--c-text); }
 .eq-total b { font-size: 16px; }
 .dd-section-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
 .dd-list { display: flex; flex-direction: column; gap: 8px; }
-.dd-item {
-  display: flex; align-items: center; gap: 10px; font-size: 13px;
-  animation: cal-item-in var(--dur-base) var(--ease-out) backwards;
-  animation-delay: calc(var(--i, 0) * 45ms);
-}
-@keyframes cal-item-in {
-  from { opacity: 0; transform: translateX(-6px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
+.dd-item { display: flex; align-items: center; gap: 10px; font-size: 13px; flex-wrap: wrap; }
 .dd-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; color: var(--c-text-2); background: var(--c-hover); flex-shrink: 0; }
-.ev-pay .dd-tag { color: var(--c-success); background: rgba(16,185,129,.12); }
-.ev-repay .dd-tag { color: var(--c-danger); background: rgba(239,68,68,.12); }
+.ev-pay .dd-tag { color: var(--c-success); background: var(--c-success-soft); }
+.ev-repay .dd-tag { color: var(--c-danger); background: var(--c-danger-soft); }
 .dd-name { flex: 1; color: var(--c-text-2); min-width: 0; }
 .dd-note { display: block; font-size: 11px; color: var(--c-text-3); margin-top: 2px; }
 .dd-amt { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.dd-empty { padding: 6px 0; }
 .dd-foot { font-size: 11px; line-height: 1.7; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--c-border); }
 
-.legend { display: flex; gap: 16px; margin-top: 14px; font-size: 12px; flex-wrap: wrap; }
-.legend .lg { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
-.lg-pay { background: var(--c-success); }
-.lg-rep { background: var(--c-danger); }
-.lg-ok { background: var(--c-success); }
-.lg-low { background: var(--c-warning); }
-.lg-neg { background: var(--c-danger); }
-
 @media (max-width: 768px) {
-  .cal-cell { min-height: 74px; padding: 5px 6px; }
-  .cal-grid { gap: 5px; }
-  .cal-balance { font-size: 11px; }
+  .cal-grid { gap: 5px; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .cal-cell, .cal-blank, .cal-cell:empty { min-height: 74px; }
+  .cal-day { padding: 5px 6px; }
+  .cal-balance { font-size: 12px; }
   .cal-balance-label, .delta-word { display: none; }
   .cal-delta { font-size: 10px; }
   .cal-daynum { font-size: 12px; }
   .mark { width: 14px; height: 14px; line-height: 14px; font-size: 9px; }
-  .rh-item { min-width: 100%; }
+  .cal-nav { gap: 6px; }
+  .dd-head, .eq-row { gap: 8px; }
 }
 </style>

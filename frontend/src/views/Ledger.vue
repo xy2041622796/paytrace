@@ -1,7 +1,10 @@
 <template>
-  <div class="ledger">
-    <h2 class="page-title">流水账本</h2>
-    <p class="muted intro">记录每一笔收支，智能记账写入的流水也会汇总到这里。数据仅本人可见。</p>
+  <div class="ledger pt-page">
+    <PageHeader
+      eyebrow="记录"
+      title="流水账本"
+      desc="记录每一笔收支，智能记账写入的流水也会汇总到这里。数据仅本人可见。"
+    />
 
     <!-- 月份与搜索 -->
     <div class="toolbar card">
@@ -18,77 +21,86 @@
 
     <!-- 选中月份汇总 -->
     <div class="stats">
-      <div class="stat card">
-        <div class="stat-label">{{ monthTitle }}收入</div>
-        <div class="stat-value text-success">{{ formatMoney(monthIncome) }}</div>
-      </div>
-      <div class="stat card">
-        <div class="stat-label">{{ monthTitle }}支出</div>
-        <div class="stat-value text-danger">{{ formatMoney(monthExpense) }}</div>
-      </div>
-      <div class="stat card">
-        <div class="stat-label">{{ monthTitle }}净额</div>
-        <div class="stat-value" :class="monthNet < 0 ? 'text-danger' : 'text-primary'">{{ formatMoney(monthNet) }}</div>
-      </div>
+      <StatCard tone="success">
+        <template #label>{{ monthTitle }}收入</template>
+        <span class="text-success">{{ formatMoney(monthIncome) }}</span>
+      </StatCard>
+      <StatCard tone="danger">
+        <template #label>{{ monthTitle }}支出</template>
+        <span class="text-danger">{{ formatMoney(monthExpense) }}</span>
+      </StatCard>
+      <StatCard :value-class="monthNet < 0 ? 'text-danger' : 'text-primary'">
+        <template #label>{{ monthTitle }}净额</template>
+        <span :class="monthNet < 0 ? 'text-danger' : 'text-primary'">{{ formatMoney(monthNet) }}</span>
+      </StatCard>
     </div>
 
-    <!-- 支出构成 -->
-    <n-card title="支出构成" class="block">
-      <div v-if="!categoryRows.length" class="muted">这个月还没有支出流水。</div>
-      <div v-for="c in categoryRows" :key="c.name" class="cat-row">
-        <span class="cat-name">{{ c.name }}</span>
-        <div class="cat-track"><div class="cat-fill" :style="{ width: c.percent + '%' }" /></div>
-        <span class="cat-amount">{{ formatMoney(c.amount) }}</span>
-      </div>
-    </n-card>
+    <!-- 记一笔 + 支出构成：宽屏主次两栏 -->
+    <div class="pt-section-label">本月概览</div>
+    <div class="pt-grid-side">
+      <!-- 手动记一笔 -->
+      <SectionCard title="记一笔" icon="plus" desc="手动补记一笔收支，备注可自动带出分类">
+        <div class="add-row ledger-row">
+          <n-date-picker v-model:value="form.date" type="date" clearable placeholder="日期" style="width:160px" />
+          <n-select v-model:value="form.direction" :options="directionOptions" style="width:110px" />
+          <n-input v-model:value="form.category" placeholder="分类（如 餐饮）" style="width:150px" />
+          <n-input-number v-model:value="form.amount" :min="0" placeholder="金额" style="width:130px" />
+          <n-input v-model:value="form.note" placeholder="备注（可选）" style="width:170px" />
+          <n-button type="primary" :loading="saving" :disabled="saving" @click="add">保存</n-button>
+        </div>
+      </SectionCard>
 
-    <!-- 待收收入 -->
-    <n-card title="待收收入" class="block">
-      <p class="muted">奖金、补贴等尚未到账的钱不计入余额，到账后一键写入流水。未到账 / 审核中计入合计；作废仅作标记、不计入合计，但保留记录可查。</p>
-      <div class="pending-sum">
-        待收合计 <b class="text-primary">{{ formatMoney(pendingTotal) }}</b>
-        <span class="muted">（{{ pendingOpen.length }} 项未到账 / 审核中）</span>
-      </div>
-      <div class="table-scroll">
-        <n-data-table
-          :columns="pendingColumns" :data="pending" :row-props="pendingRowProps"
-          :bordered="false" size="small" :scroll-x="860"
-        />
-      </div>
-      <div class="row-add">
-        <n-input v-model:value="newPending.type" placeholder="项目（如 应届生社保补贴）" style="width:190px" />
-        <n-input-number v-model:value="newPending.est_amount" placeholder="预估金额" :min="0" />
-        <n-input v-model:value="newPending.condition" placeholder="到账条件（可选）" style="width:180px" />
-        <n-button type="primary" :disabled="saving" @click="addPending">添加</n-button>
-      </div>
-    </n-card>
+      <!-- 支出构成 -->
+      <SectionCard title="支出构成" icon="chart" desc="按分类看这个月的钱花在哪">
+        <EmptyState v-if="!categoryRows.length" text="这个月还没有支出流水。" icon="inbox" />
+        <div v-for="c in categoryRows" :key="c.name" class="cat-row">
+          <span class="cat-name">{{ c.name }}</span>
+          <div class="cat-track"><div class="cat-fill" :style="{ width: c.percent + '%' }" /></div>
+          <span class="cat-amount">{{ formatMoney(c.amount) }}</span>
+        </div>
+      </SectionCard>
+    </div>
 
-    <!-- 手动记一笔 -->
-    <n-card title="记一笔" class="block">
-      <div class="add-row">
-        <n-date-picker v-model:value="form.date" type="date" clearable placeholder="日期" style="width:160px" />
-        <n-select v-model:value="form.direction" :options="directionOptions" style="width:110px" />
-        <n-input v-model:value="form.category" placeholder="分类（如 餐饮）" style="width:150px" />
-        <n-input-number v-model:value="form.amount" :min="0" placeholder="金额" style="width:130px" />
-        <n-input v-model:value="form.note" placeholder="备注（可选）" style="width:170px" />
-        <n-button type="primary" :loading="saving" :disabled="saving" @click="add">保存</n-button>
-      </div>
-    </n-card>
+    <!-- 待收收入 + 当月流水 -->
+    <div class="pt-section-label">待收与流水</div>
+    <div class="pt-grid-2">
+      <!-- 待收收入 -->
+      <SectionCard title="待收收入" icon="coins" desc="未到账收入单独登记，到账后一键写入流水">
+        <div class="pt-note ledger-note">奖金、补贴等尚未到账的钱不计入余额，到账后一键写入流水。未到账 / 审核中计入合计；作废仅作标记、不计入合计，但保留记录可查。</div>
+        <div class="pending-sum">
+          待收合计 <b class="text-primary">{{ formatMoney(pendingTotal) }}</b>
+          <StatusChip tone="info">{{ pendingOpen.length }} 项未到账 / 审核中</StatusChip>
+        </div>
+        <div class="table-scroll">
+          <n-data-table
+            :columns="pendingColumns" :data="pending" :row-props="pendingRowProps"
+            :bordered="false" size="small" :scroll-x="860"
+          />
+        </div>
+        <div class="row-add ledger-row">
+          <n-input v-model:value="newPending.type" placeholder="项目（如 应届生社保补贴）" style="width:190px" />
+          <n-input-number v-model:value="newPending.est_amount" placeholder="预估金额" :min="0" />
+          <n-input v-model:value="newPending.condition" placeholder="到账条件（可选）" style="width:180px" />
+          <n-button type="primary" :disabled="saving" @click="addPending">添加</n-button>
+        </div>
+      </SectionCard>
 
-    <!-- 流水列表 -->
-    <n-card :title="`${monthTitle}流水`" class="block">
-      <div class="table-scroll">
-        <n-data-table :columns="columns" :data="filteredRows" :bordered="false" size="small" :scroll-x="720" />
-      </div>
-      <div class="export-row">
-        <n-button size="small" :disabled="!filteredRows.length || saving" @click="exportCsv">导出为表格文件</n-button>
-        <span class="muted">导出当前搜索结果为 CSV，可用 Excel / WPS 打开。</span>
-      </div>
-    </n-card>
+      <!-- 流水列表 -->
+      <SectionCard :title="`${monthTitle}流水`" icon="listCheck" desc="当月全部流水，可导出为表格文件">
+        <div class="table-scroll">
+          <n-data-table :columns="columns" :data="filteredRows" :bordered="false" size="small" :scroll-x="720" />
+        </div>
+        <div class="export-row">
+          <n-button size="small" :disabled="!filteredRows.length || saving" @click="exportCsv">导出为表格文件</n-button>
+          <span class="muted ledger-hint">导出当前搜索结果为 CSV，可用 Excel / WPS 打开。</span>
+        </div>
+      </SectionCard>
+    </div>
 
     <!-- 月度对账 -->
-    <n-card title="月度对账" class="block">
-      <p class="muted fold-tip">把「按档案推演的全月结余」与「实际已记账的流水」放在一起比对，找出漏记或配置偏差。</p>
+    <div class="pt-section-label">核对与校准</div>
+    <SectionCard title="月度对账" icon="shieldCheck" desc="推演结余与实际流水逐笔比对">
+      <div class="pt-note ledger-note">把「按档案推演的全月结余」与「实际已记账的流水」放在一起比对，找出漏记或配置偏差。</div>
       <div class="recon-tools">
         <span class="muted">期初余额（元）</span>
         <n-input-number v-model:value="reconcileStart" :min="0" size="small" style="width:140px" />
@@ -100,19 +112,19 @@
         <div><span>实际月末结余</span><b>{{ formatMoney(actualEnd) }}</b></div>
         <div><span>偏差（实际 − 预测）</span><b :class="reconDiff < 0 ? 'text-danger' : 'text-success'">{{ formatMoney(reconDiff) }}</b></div>
       </div>
-      <div class="recon-verdict" :class="reconLevel">{{ reconVerdict }}</div>
+      <div class="recon-verdict ledger-verdict" :class="reconLevel">{{ reconVerdict }}</div>
       <div v-if="unmatchedExpenses.length" class="recon-list">
         <div class="muted">以下预测支出在流水中没有对应记录（可能还没记账）：</div>
         <div v-for="(e, i) in unmatchedExpenses" :key="i" class="recon-item">
           {{ formatDateCN(e.date) }} · {{ e.label }} {{ formatMoney(Math.abs(e.amount)) }}
         </div>
       </div>
-      <p class="muted fold-tip">
+      <div class="pt-note ledger-note">
         口径：预测含发薪、固定开支与已录入还款；实际只统计所选月份的流水。工资到账若不单独记账，
         不计入上方「未匹配」清单。期初余额与仪表盘共用同一个值；金额在容差范围内即视为同一笔，
         容差同时用于偏差判定。当月未过完时存在偏差属正常。
-      </p>
-    </n-card>
+      </div>
+    </SectionCard>
   </div>
 </template>
 
@@ -476,50 +488,21 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
-.intro { line-height: 1.7; margin-bottom: 14px; }
-.toolbar { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin: 14px 0; }
-.tool-item { display: flex; flex-direction: column; gap: 6px; }
-.tool-item.grow { flex: 1 1 200px; }
-.tool-count { font-size: 12px; padding-bottom: 4px; }
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 14px 0; }
-.stat-label { font-size: 12px; color: var(--c-text-2); margin-bottom: 8px; }
-.stat-value { font-size: 19px; font-weight: 600; word-break: break-all; }
-.block { margin-bottom: 16px; }
-.pending-sum { margin: 10px 0 12px; font-size: 14px; }
-.pending-sum .muted { font-size: 12px; }
+/* 本页特有：待收表格里的删除线与操作按钮组（由 h() 渲染列产生） */
 .void-text { text-decoration: line-through; }
-.cat-row { display: flex; align-items: center; gap: 12px; padding: 7px 0; font-size: 13px; }
-.cat-name { width: 96px; flex-shrink: 0; color: var(--c-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cat-track { flex: 1; height: 9px; border-radius: 5px; background: var(--c-hover); overflow: hidden; min-width: 40px; }
-.cat-fill { height: 100%; border-radius: 5px; background: var(--c-primary); }
-.cat-amount { width: 110px; text-align: right; flex-shrink: 0; }
-.add-row, .row-add { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
-.table-scroll { overflow-x: auto; }
-.export-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
-.export-row .muted { font-size: 12px; }
-.fold-tip { font-size: 12px; line-height: 1.7; }
+.ops { display: flex; flex-wrap: wrap; gap: 6px; }
 
-.recon-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0; }
-.recon-tools .muted { font-size: 12px; }
-.recon-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.recon-grid > div { padding: 10px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); }
-.recon-grid span { display: block; font-size: 12px; color: var(--c-text-2); margin-bottom: 6px; }
-.recon-grid b { font-size: 16px; word-break: break-all; }
-.recon-verdict { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6; }
-.recon-verdict.lv-ok { color: var(--c-success); background: rgba(16, 185, 129, .12); }
-.recon-verdict.lv-plus { color: var(--c-primary); background: var(--c-primary-soft); }
-.recon-verdict.lv-minus { color: var(--c-danger); background: rgba(239, 68, 68, .12); }
-.recon-list { margin-top: 12px; }
-.recon-item { font-size: 12px; color: var(--c-text-2); padding: 4px 0; }
+/* 对账结论：状态底色统一走语义 token，不再散落 rgba */
+.ledger-verdict.lv-ok { color: var(--c-success); background: var(--c-success-soft); }
+.ledger-verdict.lv-plus { color: var(--c-primary); background: var(--c-primary-soft); }
+.ledger-verdict.lv-minus { color: var(--c-danger); background: var(--c-danger-soft); }
+
+.ledger-hint { font-size: var(--fs-caption); }
 
 @media (max-width: 768px) {
-  .stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .stat-value { font-size: 15px; }
-  .add-row > *, .row-add > * { flex: 1 1 140px; }
-  .cat-name { width: 72px; }
-  .cat-amount { width: 92px; }
-  .recon-grid { grid-template-columns: 1fr; }
-  .toolbar { gap: 10px; }
+  .ledger-row > * { flex: 1 1 140px; }
+  .ledger-note { font-size: var(--fs-micro); }
+  .ledger-hint { font-size: var(--fs-micro); }
+  .ledger-verdict { font-size: var(--fs-caption); }
 }
 </style>

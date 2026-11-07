@@ -14,7 +14,7 @@
     <!-- 首屏 auth 未就绪：加载骨架屏（纯展示，不阻塞路由守卫） -->
     <div v-if="auth.loading" class="boot-skeleton" role="status" aria-live="polite">
       <div class="boot-card">
-        <div class="boot-brand">现金流安全垫</div>
+        <div class="boot-brand"><span class="boot-dot" />现金流安全垫</div>
         <div class="boot-line w-60" />
         <div class="boot-line w-90" />
         <div class="boot-line w-75" />
@@ -23,13 +23,13 @@
       </div>
     </div>
 
-    <!-- 全局错误收集展示入口 -->
+    <!-- 全局错误收集：只在真的出现异常时出现，不占用正常界面的视觉空间 -->
     <button
-      class="err-entry"
-      :class="{ 'has-error': errorTotal > 0 }"
+      v-if="errorTotal > 0"
+      class="err-entry has-error"
       @click="showErrors = !showErrors"
     >
-      运行诊断{{ errorTotal > 0 ? '（' + errorTotal + '）' : '' }}
+      运行诊断（{{ errorTotal }}）
     </button>
     <div v-if="showErrors" class="err-panel">
       <div class="err-panel-head">
@@ -65,29 +65,33 @@ const theme = useThemeStore()
 const auth = useAuthStore()
 const naiveTheme = computed(() => (theme.isDark ? darkTheme : null))
 
-// 统一覆盖 Naive UI 主题：主色橙，圆角 8px
+// 统一覆盖 Naive UI 主题：主色与 theme.css 的 --c-primary 严格对齐
 // 深色下提亮主色保证对比度，并让组件底色与 --c-bg / --c-surface 对齐
 const themeOverrides = computed(() => ({
   common: {
     ...(theme.isDark
       ? {
-          primaryColor: '#FF8457',
-          primaryColorHover: '#FF9B75',
-          primaryColorPressed: '#E8703F',
-          primaryColorSuppl: '#FF8457',
-          bodyColor: '#14171C',
-          cardColor: '#1D2129',
-          popoverColor: '#1D2129'
+          primaryColor: '#FF8A5C',
+          primaryColorHover: '#FFA47C',
+          primaryColorPressed: '#EC7143',
+          primaryColorSuppl: '#FF8A5C',
+          bodyColor: '#0E1218',
+          cardColor: '#171D26',
+          popoverColor: '#1C232E',
+          borderColor: '#29323F',
+          inputColor: '#1C232E'
         }
       : {
-          primaryColor: '#FF6B35',
-          primaryColorHover: '#FF8554',
-          primaryColorPressed: '#E85A28',
-          primaryColorSuppl: '#FF8554',
-          borderColor: '#E5E7EB'
+          primaryColor: '#EA6234',
+          primaryColorHover: '#F47A4C',
+          primaryColorPressed: '#CE4E24',
+          primaryColorSuppl: '#F47A4C',
+          borderColor: '#E4E9F0',
+          inputColor: '#FFFFFF'
         }),
     borderRadius: '8px',
-    fontSize: '14px'
+    fontSize: '14px',
+    lineHeight: '1.65'
   }
 }))
 
@@ -123,20 +127,36 @@ onBeforeUnmount(() => {
   background: var(--c-bg);
 }
 .boot-card {
-  width: min(360px, 86vw);
-  padding: 24px;
+  width: min(380px, 86vw);
+  padding: 28px;
   border: 1px solid var(--c-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--c-surface);
+  box-shadow: var(--shadow-md);
   animation: boot-pop var(--dur-slow) var(--ease-out) both;
 }
-.boot-brand { font-size: 16px; font-weight: 600; margin-bottom: 18px; }
-/* shimmer 用伪元素 transform 位移，不动画 background-position（避免持续重绘） */
+.boot-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  color: var(--c-text);
+}
+.boot-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c-primary);
+  box-shadow: 0 0 0 4px var(--c-primary-soft);
+}
+/* shimmer 用伪元素 transform 位移，不动画布局属性（避免持续重绘） */
 .boot-line, .boot-block {
   position: relative;
   overflow: hidden;
-  border-radius: 6px;
-  background: var(--c-hover);
+  border-radius: var(--r-sm);
+  background: var(--c-surface-3);
 }
 .boot-line::after, .boot-block::after {
   content: '';
@@ -147,7 +167,7 @@ onBeforeUnmount(() => {
   animation: boot-sweep 1.4s var(--ease-in-out) infinite;
 }
 .boot-line { height: 12px; margin-bottom: 12px; }
-.boot-block { height: 96px; border-radius: 8px; margin: 8px 0 16px; }
+.boot-block { height: 96px; border-radius: var(--r-md); margin: 8px 0 16px; }
 .w-60 { width: 60%; }
 .w-75 { width: 75%; }
 .w-90 { width: 90%; }
@@ -170,16 +190,12 @@ onBeforeUnmount(() => {
   bottom: 72px;
   z-index: 90;
   font-size: 12px;
-  padding: 6px 10px;
-  border: 1px solid var(--c-border);
+  padding: 6px 12px;
+  border: 1px solid var(--c-danger);
   border-radius: 999px;
-  background: var(--c-surface);
-  color: var(--c-text-2);
-  cursor: pointer;
-}
-.err-entry.has-error {
+  background: var(--c-danger-soft);
   color: var(--c-danger);
-  border-color: var(--c-danger);
+  cursor: pointer;
   animation: boot-alert 1.8s var(--ease-in-out) 2;
 }
 @keyframes boot-alert { 50% { transform: scale(1.06); } }
@@ -194,8 +210,9 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding: 14px;
   border: 1px solid var(--c-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--c-surface);
+  box-shadow: var(--shadow-lg);
 }
 .err-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .err-close {
@@ -215,7 +232,7 @@ onBeforeUnmount(() => {
   line-height: 1.6;
   padding: 6px 8px;
   margin-bottom: 4px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: var(--c-hover);
   word-break: break-word;
 }

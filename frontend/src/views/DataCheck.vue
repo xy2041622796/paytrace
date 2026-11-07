@@ -1,27 +1,25 @@
 <template>
-  <div class="check">
-    <h2 class="page-title">数据体检</h2>
+  <div class="check pt-page">
+    <PageHeader
+      eyebrow="工具"
+      title="数据体检"
+      desc="主动扫描档案、开支、还款与流水的合法性，把脏数据挡在推演之前。检查只读，不会修改任何数据。"
+    >
+      <template #actions>
+        <n-button type="primary" :loading="checking" @click="runCheck">重新检查</n-button>
+        <n-button :loading="exporting" :disabled="exporting" @click="exportBackup">导出全量备份</n-button>
+        <n-button :disabled="!!presetPlan" @click="preparePreset">按基准数据预填</n-button>
+      </template>
+    </PageHeader>
 
     <!-- 常驻错误条：加载 / 检查失败时明确显示，不只是一闪而过的提示 -->
-    <div v-if="loadError" class="load-error card" role="alert">
+    <div v-if="loadError" class="load-error card dc-alert" role="alert">
       <div class="load-error-text">
         <b>数据加载失败</b>
         <span>{{ loadError }}</span>
         <span>可检查网络与登录态后重试；页面下方的扫描结果可能不完整。</span>
       </div>
       <n-button size="small" type="primary" :loading="checking" @click="runCheck">重试</n-button>
-    </div>
-
-    <p class="muted intro">
-      主动扫描档案、开支、还款与流水的合法性，把脏数据挡在推演之前。
-      检查只读，不会修改任何数据。
-    </p>
-
-    <div class="bar">
-      <n-button type="primary" :loading="checking" @click="runCheck">重新检查</n-button>
-      <n-button :loading="exporting" :disabled="exporting" @click="exportBackup">导出全量备份</n-button>
-      <n-button :disabled="!!presetPlan" @click="preparePreset">按基准数据预填</n-button>
-      <span class="muted">上次检查：{{ formatDateTimeCN(checkedAt) }}</span>
     </div>
 
     <div v-if="presetPlan" class="preset card">
@@ -38,29 +36,35 @@
     <p class="muted intro">备份是只读的 JSON 快照，刻意不提供导入功能，避免误覆盖现有数据。</p>
 
     <div class="summary">
-      <div class="s card"><div class="sl">严重问题</div><div class="sv text-danger">{{ errorCount }}</div></div>
-      <div class="s card"><div class="sl">需要留意</div><div class="sv text-warning">{{ warnCount }}</div></div>
-      <div class="s card"><div class="sl">提示</div><div class="sv text-success">{{ infoCount }}</div></div>
+      <StatCard label="严重问题" tone="danger" value-class="text-danger">{{ errorCount }}</StatCard>
+      <StatCard label="需要留意" tone="warning" value-class="text-warning">{{ warnCount }}</StatCard>
+      <StatCard label="提示" tone="success" value-class="text-success">{{ infoCount }}</StatCard>
     </div>
 
-    <div v-if="!issues.length" class="muted">点击「重新检查」开始扫描。</div>
-    <div v-for="(item, idx) in issues" :key="idx" class="issue card" :class="'lv-' + item.level">
-      <div class="issue-head"><span class="tag">{{ levelLabel[item.level] }}</span><b>{{ item.title }}</b></div>
-      <div class="detail">{{ item.detail }}</div>
-      <div v-if="item.advice" class="advice">处理建议：{{ item.advice }}</div>
-    </div>
+    <SectionCard title="扫描结果" desc="按级别列出需要处理的数据问题" icon="shieldCheck">
+      <template #actions>
+        <span class="muted">上次检查：{{ formatDateTimeCN(checkedAt) }}</span>
+      </template>
+      <EmptyState v-if="!issues.length" icon="inbox">点击「重新检查」开始扫描。</EmptyState>
+      <div v-for="(item, idx) in issues" :key="idx" class="issue card" :class="'lv-' + item.level">
+        <div class="issue-head">
+          <StatusChip :tone="item.level === 'red' ? 'danger' : item.level === 'yellow' ? 'warning' : 'success'">{{ levelLabel[item.level] }}</StatusChip>
+          <b>{{ item.title }}</b>
+        </div>
+        <div class="detail">{{ item.detail }}</div>
+        <div v-if="item.advice" class="advice">处理建议：{{ item.advice }}</div>
+      </div>
+    </SectionCard>
 
     <!-- AI 交互日志：只读回看 + 标记采纳状态 -->
-    <div class="ai-log card">
-      <div class="ai-log-head">
-        <b>AI 交互日志</b>
-        <n-button size="small" :loading="logLoading" @click="loadAiLogs">刷新</n-button>
+    <SectionCard title="AI 交互日志" desc="来自 ai_interaction_log。可标记「已采纳 / 未采纳」，用于回看 AI 记账与购物劝导是否被采用；标记只写采纳状态，不改原始解析结果。" icon="listCheck">
+      <template #actions>
         <span class="muted">最近 50 条，按时间倒序</span>
-      </div>
-      <p class="muted intro">来自 ai_interaction_log。可标记「已采纳 / 未采纳」，用于回看 AI 记账与购物劝导是否被采用；标记只写采纳状态，不改原始解析结果。</p>
+        <n-button size="small" :loading="logLoading" @click="loadAiLogs">刷新</n-button>
+      </template>
       <div v-if="logError" class="log-error">{{ logError }}</div>
-      <div v-else-if="!aiLogs.length" class="muted">暂无 AI 交互记录。</div>
-      <div v-else class="log-table-wrap">
+      <EmptyState v-else-if="!aiLogs.length" icon="inbox">暂无 AI 交互记录。</EmptyState>
+      <div v-else class="log-table-wrap dc-table">
         <table class="log-table">
           <thead>
             <tr><th>时间</th><th>动作</th><th>置信度</th><th>采纳状态</th><th>操作</th></tr>
@@ -81,7 +85,7 @@
           </tbody>
         </table>
       </div>
-    </div>
+    </SectionCard>
   </div>
 </template>
 
@@ -392,45 +396,14 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
-.intro { line-height: 1.7; margin-bottom: 14px; }
-.bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.bar .muted { font-size: 12px; }
-.load-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-left: 3px solid var(--c-danger); padding: 12px 14px; margin: 12px 0; }
-.load-error-text { display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 0; }
-.load-error-text span { color: var(--c-text-2); line-height: 1.6; word-break: break-word; }
-.summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 16px 0; }
-.sl { font-size: 12px; color: var(--c-text-2); margin-bottom: 6px; }
-.sv { font-size: 22px; font-weight: 600; }
-.text-warning { color: var(--c-warning); }
-.issue { border-left: 3px solid var(--c-border); margin-bottom: 10px; padding: 12px 14px; }
-.issue.lv-red { border-left-color: var(--c-danger); }
-.issue.lv-yellow { border-left-color: var(--c-warning); }
-.issue.lv-info { border-left-color: var(--c-success); }
-.issue-head { display: flex; align-items: center; gap: 10px; }
-.tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--c-hover); color: var(--c-text-2); }
-.lv-red .tag { color: var(--c-danger); background: rgba(239, 68, 68, .12); }
-.lv-yellow .tag { color: var(--c-warning); background: rgba(245, 158, 11, .14); }
-.lv-info .tag { color: var(--c-success); background: rgba(16, 185, 129, .12); }
-.detail { font-size: 13px; color: var(--c-text-2); margin-top: 6px; line-height: 1.6; }
-.advice { font-size: 13px; margin-top: 4px; line-height: 1.6; }
-.preset { border-left: 3px solid var(--c-primary, #FF6B35); margin: 14px 0; padding: 12px 14px; }
-.preset .intro { margin: 8px 0 4px; }
-.preset-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-.ai-log { padding: 14px; margin-top: 18px; }
-.ai-log-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.ai-log-head .muted { font-size: 12px; }
-.ai-log .intro { margin: 8px 0 0; }
-.log-error { color: var(--c-danger); font-size: 13px; margin-top: 10px; }
-.log-table-wrap { overflow-x: auto; margin-top: 10px; }
-.log-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
-.log-table th, .log-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--c-border); vertical-align: middle; white-space: nowrap; }
-.log-table th { color: var(--c-text-2); font-weight: 600; }
-.log-table td { color: var(--c-text-2); }
-.log-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 本页特有：错误条换行、日志表格窄屏横向滚动；区块/表格/状态样式全部交给全局 */
+.check { min-width: 0; }
+.dc-alert { flex-wrap: wrap; }
+.dc-table { max-width: 100%; overflow-x: auto; }
 
 @media (max-width: 768px) {
-  .summary { gap: 8px; }
-  .sv { font-size: 19px; }
+  .check { min-width: 0; max-width: 100%; }
+  .dc-alert { gap: 8px; }
+  .dc-table { -webkit-overflow-scrolling: touch; }
 }
 </style>

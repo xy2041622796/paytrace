@@ -1,7 +1,7 @@
 # 现金流安全垫 · 前端
 
 > Vue 3 + Vite + vue-router（hash 模式）+ Pinia + Naive UI（按需引入）+ ECharts（按需引入）+ `@supabase/supabase-js`。
-> 视觉遵循极简留白（白底 + 1px 浅灰描边 + 唯一橙色 `#FF6B35`），界面全中文，与 `../supabase/` 后端配套。
+> 视觉采用统一设计系统 v2「Calm Fintech Console」：浅灰画布托起纯白卡片、单一珊瑚橙主色、语义状态色、分组导航与共享组件；界面全中文，与 `../supabase/` 后端配套。完整走查与改动说明见根目录 `../REDESIGN_NOTES.md`。
 
 ## 技术栈
 
@@ -29,6 +29,15 @@
 
 用户名 + 密码，内部映射为 `用户名@paytrace.local` 别名（Supabase Auth 底层身份仍是 email），用户只感知用户名；RLS / `auth.uid()` / 业务表一行未改。需在 Supabase 关闭 **Confirm email**，否则别名注册无法自动登录。所有展示用户身份的地方剥掉别名后缀，统一取 `auth.username`。
 
+## 统一设计系统（v2）
+
+- **单一数据源**：`src/styles/theme.css` 的 `:root` / `[data-theme='dark']` 定义全部颜色、圆角、阴影、间距、字号与动效 token。页面 `<style scoped>` 只负责本页特有结构，禁止再定义共享类或硬编码颜色。
+- **全局组件类**：`.pt-page / .pt-page-head / .pt-section-label / .pt-grid-2 / .pt-grid-side / .pt-card / .pt-section-head / .pt-stat / .pt-chip / .pt-btn / .pt-note / .pt-empty / .pt-legend` 等，旧类名（`.card / .page-title / .stats / .stat / .table-scroll / .tag / ...`）保持兼容并由全局统一样式接管。
+- **全局注册组件**（`main.js`，页面无需 import）：`PageHeader`（页头 + 操作区）、`SectionCard`（带图标/说明/操作槽的分区卡）、`StatCard`（KPI 卡）、`StatusChip`（状态徽标）、`EmptyState`（空状态）、`AppIcon`（纯 SVG 线性图标集）。
+- **布局节奏**：页头（分组标签 / 标题 / 说明 / 操作）→ 指标条 → 主内容（宽屏两栏）→ 次要/折叠内容；`.pt-section-label` 做分组，避免十余张等权卡片平铺。
+- **导航**：`AppLayout` 侧边栏按「看现金流 / 记一笔 / 管数据」分组并带图标；≤768px 切换为顶栏 + 5 项底部导航（4 个高频入口 + 「更多」面板），「更多」里聚合全部 7 个页面与主题/打码/导出/退出，任何功能都不会被藏起来。
+- **深浅色**：Naive UI 主题覆盖、ECharts 取 CSS 变量、Mascot 语义配色三者与 CSS token 对齐；`prefers-reduced-motion` 全量清零动画与延迟，金额永不数字滚动。
+
 ## 数据与推演口径
 
 - **统一推演入口** `src/composables/useProjection.js`：`buildProjection()`（仪表盘 / 多月前瞻）、`buildMonthProjection()`（现金流日历跨月滚动）。两个页面共用同一份参数组装，杜绝「同月出现两个预测值」。
@@ -51,14 +60,16 @@ frontend/
 ├─ verify.mjs              # 124 项回归断言（esbuild + data URL 导入，无需临时文件）
 ├─ lint.mjs                # 零依赖静态检查
 └─ src/
-   ├─ main.js              # createApp + createPinia + 按需注册 Naive UI + 启动初始化 auth
-   ├─ App.vue              # n-config-provider > message/dialog > router-view（含首屏骨架屏、全局错误入口）
+   ├─ main.js              # createApp + createPinia + 按需注册 Naive UI + 全局共享组件 + 启动初始化 auth
+   ├─ App.vue              # n-config-provider > message/dialog > router-view（含首屏骨架屏、异常时才出现的诊断入口）
    ├─ router/index.js      # 嵌套布局 + 登录守卫（getSession）
+   ├─ styles/theme.css     # 统一设计系统 v2：全部 token + 全局组件类 + 动效/响应式
    ├─ stores/              # auth / app / theme
    ├─ composables/         # useCashflow（纯函数引擎）/ useProjection / useMediaQuery / useBusy
-   ├─ lib/                 # supabase / date / constants / holidays2026 / insurance / validation /
-   │                      # reconcile / prefs / baseline / labels / privacy / aiDraft / cache
-   ├─ components/          # AppLayout / CashflowTimeline
+   ├─ lib/                 # supabase / demo（零配置演示后端）/ date / constants / holidays2026 / insurance /
+   │                      # validation / reconcile / prefs / baseline / labels / privacy / aiDraft / cache
+   ├─ components/          # AppLayout / CashflowTimeline / Mascot + 6 个设计系统组件
+   │                      # (AppIcon / PageHeader / SectionCard / StatCard / StatusChip / EmptyState)
    └─ views/               # Login / Dashboard / Calendar / AINote / Ledger / Settings / DataCheck / Todo
 ```
 
@@ -66,12 +77,21 @@ frontend/
 
 ```bash
 cd frontend
-cp .env.example .env          # 填入你的 Supabase URL / anon key（本机已填可跳过）
 npm ci                        # 用现有 package-lock.json，零新增依赖
-npm run dev                   # http://localhost:5173
+npm run dev                   # http://localhost:5173（端口占用时 Vite 自动顺延）
 ```
 
-## 环境变量（.env）
+**零配置即可运行**：若未配置 `.env`，`src/lib/supabase.js` 自动切换为「本地演示模式」（`src/lib/demo.js`）——自动登录演示账号、预置与 `0002_real_data_seed.sql` 一致的业务数据、支持全部增删改查与 AI 草稿解析，数据只存浏览器 localStorage，不发任何外部请求。侧边栏会显示「演示模式」标识。
+
+需要接入真实后端时：
+
+```bash
+cp .env.example .env          # 填入你的 Supabase URL / anon key
+```
+
+配置后走原生 Supabase SDK，演示层完全不参与。
+
+## 环境变量（.env，可选）
 
 ```
 VITE_SUPABASE_URL=https://xxxx.supabase.co

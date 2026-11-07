@@ -1,31 +1,46 @@
 <template>
-  <div class="settings">
-    <h2 class="page-title">档案配置</h2>
-    <p class="muted intro">
-      工资、社保基数这类档案长期不变，设定一次持续生效。仅在调薪或基数调整时变更，
-      每次变更会新增一个版本、保留历史，不会覆盖旧记录。所有数据仅本人可见。
-    </p>
+  <div class="settings pt-page">
+    <PageHeader
+      eyebrow="管理"
+      title="档案配置"
+      desc="工资、社保基数这类档案长期不变，设定一次持续生效。仅在调薪或基数调整时变更，每次变更会新增一个版本、保留历史，不会覆盖旧记录。所有数据仅本人可见。"
+    />
 
-    <!-- 只读档案总览 -->
-    <n-card title="当前生效档案" class="block">
-      <div class="archive-grid">
-        <div class="arch-item"><span>所在城市</span><b>{{ archive.city }}</b></div>
-        <div class="arch-item"><span>入职日期</span><b>{{ formatDateCN(archive.hireDate) }}</b></div>
-        <div class="arch-item"><span>发薪日</span><b>每月 {{ archive.payDay }} 日（当天到账）</b></div>
-        <div class="arch-item"><span>工作制</span><b>固定双休</b></div>
-        <div class="arch-item"><span>薪资阶段</span><b>{{ phaseLabel }}</b></div>
-        <div class="arch-item"><span>税前月薪</span><b>{{ formatMoney(app.salaryConfig?.pre_tax_salary) }}</b></div>
-        <div class="arch-item"><span>预计到手</span><b class="text-primary">{{ formatMoney(netNow.net) }}</b></div>
-        <div class="arch-item"><span>个税起征点</span><b>{{ formatMoney(taxThreshold) }}</b></div>
-      </div>
-      <div class="archive-foot">
-        <span class="muted">{{ archiveHint }}</span>
-        <n-button size="small" @click="editing = !editing">{{ editing ? '收起编辑' : '变更档案' }}</n-button>
-      </div>
-    </n-card>
+    <!-- 档案总览 + 版本历史：宽屏主次两栏，避免卡片平铺 -->
+    <div class="pt-section-label">档案概览</div>
+    <div class="pt-grid-side">
+      <!-- 只读档案总览 -->
+      <SectionCard title="当前生效档案" icon="user" desc="长期不变的基础档案，设定一次持续生效" accent>
+        <div class="archive-grid">
+          <div class="arch-item"><span>所在城市</span><b>{{ archive.city }}</b></div>
+          <div class="arch-item"><span>入职日期</span><b>{{ formatDateCN(archive.hireDate) }}</b></div>
+          <div class="arch-item"><span>发薪日</span><b>每月 {{ archive.payDay }} 日（当天到账）</b></div>
+          <div class="arch-item"><span>工作制</span><b>固定双休</b></div>
+          <div class="arch-item"><span>薪资阶段</span><b>{{ phaseLabel }}</b></div>
+          <div class="arch-item"><span>税前月薪</span><b>{{ formatMoney(app.salaryConfig?.pre_tax_salary) }}</b></div>
+          <div class="arch-item"><span>预计到手</span><b class="text-primary">{{ formatMoney(netNow.net) }}</b></div>
+          <div class="arch-item"><span>个税起征点</span><b>{{ formatMoney(taxThreshold) }}</b></div>
+        </div>
+        <div class="archive-foot">
+          <span class="muted archive-hint">{{ archiveHint }}</span>
+          <n-button size="small" @click="editing = !editing">{{ editing ? '收起编辑' : '变更档案' }}</n-button>
+        </div>
+      </SectionCard>
+
+      <!-- 版本历史 -->
+      <SectionCard title="档案变更记录" icon="clock" desc="每次变更新增一个版本，保留历史不覆盖">
+        <EmptyState v-if="!app.salaryHistory.length" text="暂无变更记录。" icon="inbox" />
+        <div v-for="(h, i) in app.salaryHistory" :key="h.id" class="history-row">
+          <span class="hist-tag" :class="{ current: i === 0 }">{{ i === 0 ? '当前生效' : '历史版本' }}</span>
+          <span>{{ formatDateCN(h.created_at) }}</span>
+          <span>税前 {{ formatMoney(h.pre_tax_salary) }}</span>
+          <span>到手 {{ formatMoney(historyNet(h)) }}</span>
+        </div>
+      </SectionCard>
+    </div>
 
     <!-- 编辑态 -->
-    <n-card v-if="editing" title="变更档案" class="block">
+    <SectionCard v-if="editing" title="变更档案" icon="edit" desc="调薪或基数调整时生成新版本，旧记录完整保留">
       <h4 class="sub-title">基础信息</h4>
       <n-form :label-placement="isMobile ? 'top' : 'left'" :label-width="isMobile ? 'auto' : 130">
         <n-form-item label="所在城市">
@@ -69,14 +84,14 @@
       <!-- 按武汉模板预填：严格「预览 → 确认」两步，只填未填字段，绝不覆盖用户已填值；只改表单，不写库 -->
       <n-divider />
       <h4 class="sub-title">按武汉模板预填</h4>
-      <p class="muted fold-tip">
+      <div class="pt-note settings-note">
         当前生效的个人比例：养老 {{ pctText(effectiveRates.personal.pension) }}、
         医疗 {{ pctText(effectiveRates.personal.medical) }}、
         失业 {{ pctText(effectiveRates.personal.unemployment) }}、
         公积金 {{ pctText(effectiveRates.personal.fund) }}、
         大额医疗 {{ effectiveRates.personal.bigMedicalFixed }} 元（固定）。
         来源：<b>{{ rulesSource }}</b>（{{ app.insuranceRules.length }} 条规则）。
-      </p>
+      </div>
       <div v-if="ruleNotes.length" class="rule-notes">
         <div class="rule-note rule-note-head">
           <span>缴纳方 · 险种</span><span>比例 / 固定额</span><span>基数说明 / 计算依据</span>
@@ -87,7 +102,7 @@
           <span class="muted">{{ note.baseLabel }} / {{ note.calcBasis }}</span>
         </div>
       </div>
-      <p v-else class="muted fold-tip">规则表暂无数据，个人 / 公司比例与口径说明使用内置兜底常量。</p>
+      <div v-else class="pt-note settings-note">规则表暂无数据，个人 / 公司比例与口径说明使用内置兜底常量。</div>
       <div class="form-actions">
         <n-button size="small" :disabled="saving || !!presetPreview" @click="previewWuhan">预览武汉模板</n-button>
         <template v-if="presetPreview">
@@ -98,7 +113,7 @@
         </template>
       </div>
       <div v-if="presetPreview" class="preset-preview">
-        <p class="muted fold-tip">仅修改上方表单，不写入数据库；确认后仍需点「保存为新版本」才会落库。</p>
+        <div class="pt-note settings-note">仅修改上方表单，不写入数据库；确认后仍需点「保存为新版本」才会落库。</div>
         <div v-for="(line, i) in presetPreview.applied" :key="'a' + i" class="preset-line">将填入：{{ line }}</div>
         <div v-for="(line, i) in presetPreview.skipped" :key="'s' + i" class="preset-line muted">保留：{{ line }}</div>
         <div v-if="!presetPreview.applied.length" class="preset-line">
@@ -114,27 +129,16 @@
         <n-button type="primary" :loading="saving" :disabled="saving" @click="saveSalary">保存为新版本</n-button>
         <n-button @click="editing = false">取消</n-button>
       </div>
-    </n-card>
-
-    <!-- 版本历史 -->
-    <n-card title="档案变更记录" class="block">
-      <div v-if="!app.salaryHistory.length" class="muted">暂无变更记录。</div>
-      <div v-for="(h, i) in app.salaryHistory" :key="h.id" class="history-row">
-        <span class="hist-tag" :class="{ current: i === 0 }">{{ i === 0 ? '当前生效' : '历史版本' }}</span>
-        <span>{{ formatDateCN(h.created_at) }}</span>
-        <span>税前 {{ formatMoney(h.pre_tax_salary) }}</span>
-        <span>到手 {{ formatMoney(historyNet(h)) }}</span>
-      </div>
-    </n-card>
+    </SectionCard>
 
     <!-- 年内历史薪资（个税校准） -->
     <n-collapse class="block">
       <n-collapse-item title="年内历史薪资（个税校准）" name="ytd">
-        <p class="muted fold-tip">
+        <div class="pt-note settings-note">
           累计预扣法默认假设年内每月薪资相同。若年内调过薪，把各月工资条上的
           「税前工资」和「五险一金个人合计」填进来，仪表盘会按真实累计重算个税。
           这些数据只保存在本机，不上传。
-        </p>
+        </div>
         <div class="ytd-head"><span>月份</span><span>税前月薪</span><span>五险一金合计</span><span>操作</span></div>
         <div v-for="(r, i) in ytdRows" :key="i" class="ytd-row">
           <n-select v-model:value="r.month" :options="monthOptions" size="small" />
@@ -146,44 +150,49 @@
           <n-button size="small" @click="addYtdRow">添加一个月</n-button>
           <n-button size="small" type="primary" :disabled="saving" @click="saveYtd">保存校准</n-button>
         </div>
-        <p class="muted fold-tip">已保存 {{ savedYtdCount }} 个月；未填金额（0）的月份不参与累计。</p>
+        <div class="pt-note settings-note">已保存 {{ savedYtdCount }} 个月；未填金额（0）的月份不参与累计。</div>
       </n-collapse-item>
     </n-collapse>
 
-    <!-- 月固定开支 -->
-    <n-card title="月固定开支" class="block">
-      <div class="table-scroll">
-        <n-data-table :columns="expColumns" :data="app.expenses" :bordered="false" size="small" :scroll-x="620" />
-      </div>
-      <div v-if="editingExp" class="edit-row">
-        <n-input v-model:value="editExp.name" placeholder="名称" style="width:150px" />
-        <n-input-number v-model:value="editExp.monthly_amount" placeholder="月金额" :min="0" style="width:130px" />
-        <n-input-number v-model:value="editExp.deduct_day" placeholder="扣款日" :min="1" :max="31" style="width:110px" />
-        <n-button size="small" type="primary" :disabled="saving" @click="saveExp">保存</n-button>
-        <n-button size="small" @click="editingExp = null">取消</n-button>
-      </div>
-      <div class="row-add">
-        <n-input v-model:value="newExp.name" placeholder="名称（如 房租）" style="width:150px" />
-        <n-input-number v-model:value="newExp.monthly_amount" placeholder="月金额" :min="0" />
-        <n-input-number v-model:value="newExp.deduct_day" placeholder="扣款日" :min="1" :max="31" />
-        <n-button type="primary" :disabled="saving" @click="addExp">添加</n-button>
-      </div>
-    </n-card>
+    <!-- 固定开支与还款：宽屏两栏分组 -->
+    <div class="pt-section-label">每月开支与还款</div>
+    <div class="pt-grid-2">
+      <!-- 月固定开支 -->
+      <SectionCard title="月固定开支" icon="wallet" desc="每月固定扣款的开支项与扣款日">
+        <div class="table-scroll">
+          <n-data-table :columns="expColumns" :data="app.expenses" :bordered="false" size="small" :scroll-x="620" />
+        </div>
+        <div v-if="editingExp" class="edit-row settings-row">
+          <n-input v-model:value="editExp.name" placeholder="名称" style="width:150px" />
+          <n-input-number v-model:value="editExp.monthly_amount" placeholder="月金额" :min="0" style="width:130px" />
+          <n-input-number v-model:value="editExp.deduct_day" placeholder="扣款日" :min="1" :max="31" style="width:110px" />
+          <n-button size="small" type="primary" :disabled="saving" @click="saveExp">保存</n-button>
+          <n-button size="small" @click="editingExp = null">取消</n-button>
+        </div>
+        <div class="row-add settings-row">
+          <n-input v-model:value="newExp.name" placeholder="名称（如 房租）" style="width:150px" />
+          <n-input-number v-model:value="newExp.monthly_amount" placeholder="月金额" :min="0" />
+          <n-input-number v-model:value="newExp.deduct_day" placeholder="扣款日" :min="1" :max="31" />
+          <n-button type="primary" :disabled="saving" @click="addExp">添加</n-button>
+        </div>
+      </SectionCard>
 
-    <!-- 还款日历 -->
-    <n-card title="还款日历" class="block">
-      <div class="table-scroll">
-        <n-data-table :columns="repayColumns" :data="app.repayments" :bordered="false" size="small" :scroll-x="880" />
-      </div>
-      <div class="row-add">
-        <n-date-picker v-model:value="newRep.date" type="date" clearable placeholder="还款日" style="width:160px" />
-        <n-input-number v-model:value="newRep.amount" placeholder="金额" :min="0" />
-        <n-button type="primary" :disabled="saving" @click="addRep">添加</n-button>
-      </div>
-      <p class="muted">还款按账单日当天扣款，不因周末或节假日顺延。</p>
-    </n-card>
+      <!-- 还款日历 -->
+      <SectionCard title="还款日历" icon="calendar" desc="按账单日当天扣款，不顺延">
+        <div class="table-scroll">
+          <n-data-table :columns="repayColumns" :data="app.repayments" :bordered="false" size="small" :scroll-x="880" />
+        </div>
+        <div class="row-add settings-row">
+          <n-date-picker v-model:value="newRep.date" type="date" clearable placeholder="还款日" style="width:160px" />
+          <n-input-number v-model:value="newRep.amount" placeholder="金额" :min="0" />
+          <n-button type="primary" :disabled="saving" @click="addRep">添加</n-button>
+        </div>
+        <div class="pt-note settings-note">还款按账单日当天扣款，不因周末或节假日顺延。</div>
+      </SectionCard>
+    </div>
 
     <!-- 负债清单 -->
+    <div class="pt-section-label">进阶校准与负债</div>
     <n-collapse class="block">
       <n-collapse-item title="负债清单" name="liability">
         <div class="pending-sum">
@@ -193,7 +202,7 @@
         <div class="table-scroll">
           <n-data-table :columns="liabilityColumns" :data="app.liabilities" :bordered="false" size="small" :scroll-x="880" />
         </div>
-        <div v-if="editingLia" class="edit-row">
+        <div v-if="editingLia" class="edit-row settings-row">
           <n-select v-model:value="editLia.type" :options="liabilityTypeOptions" style="width:110px" />
           <n-select v-model:value="editLia.status" :options="liabilityStatusOptions" style="width:100px" />
           <n-input-number v-model:value="editLia.total" placeholder="总额" :min="0" style="width:110px" />
@@ -204,7 +213,7 @@
           <n-button size="small" type="primary" :disabled="saving" @click="saveLia">保存</n-button>
           <n-button size="small" @click="editingLia = null">取消</n-button>
         </div>
-        <div class="row-add">
+        <div class="row-add settings-row">
           <n-select v-model:value="newLia.type" :options="liabilityTypeOptions" style="width:120px" />
           <n-select v-model:value="newLia.status" :options="liabilityStatusOptions" style="width:110px" />
           <n-input-number v-model:value="newLia.total" placeholder="总额" :min="0" />
@@ -215,11 +224,11 @@
           <n-date-picker v-model:value="newLia.next_repay_date" type="date" clearable placeholder="下次还款日" style="width:160px" />
           <n-button type="primary" :disabled="saving" @click="addLia">添加</n-button>
         </div>
-        <p class="muted fold-tip">
+        <div class="pt-note settings-note">
           预估剩余期数：<b>{{ estRemainPeriods == null ? '—' : estRemainPeriods + ' 期' }}</b>
           （估算值 = ceil(剩余本金 / 月供)，未计入利息与手续费，仅供参考；月供仅用于估算，不写入数据库）
-        </p>
-        <p class="muted fold-tip">负债仅用于总览，不会自动改写还款日历；请按需在上方「还款日历」录入实际扣款。</p>
+        </div>
+        <div class="pt-note settings-note">负债仅用于总览，不会自动改写还款日历；请按需在上方「还款日历」录入实际扣款。</div>
       </n-collapse-item>
     </n-collapse>
   </div>
@@ -695,57 +704,61 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
-.intro { line-height: 1.7; margin-bottom: 16px; }
-.block { margin-bottom: 16px; }
-.sub-title { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
-.archive-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 18px; }
+/* 本页特有：档案网格 / 编辑表单 / 历史行 / 规则表 / 年内校准表单 */
+.archive-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 18px; }
 .arch-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.arch-item span { font-size: 12px; color: var(--c-text-2); }
-.arch-item b { font-size: 14px; font-weight: 600; word-break: break-all; }
+.arch-item span { font-size: var(--fs-caption); color: var(--c-text-2); }
+.arch-item b { font-size: var(--fs-body); font-weight: 600; word-break: break-all; }
 .archive-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--c-border); flex-wrap: wrap;
 }
-.archive-foot .muted { font-size: 12px; }
-.form-actions { display: flex; gap: 10px; margin-top: 14px; }
+.archive-hint { font-size: var(--fs-caption); }
+.sub-title { font-size: var(--fs-section); font-weight: 700; margin: 0 0 12px; color: var(--c-text); }
+.form-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 .preview { margin-top: 12px; font-size: 13px; }
 .history-row {
-  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
   padding: 9px 0; border-bottom: 1px solid var(--c-border); font-size: 13px;
 }
-.hist-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; color: var(--c-text-2); background: var(--c-hover); }
+.history-row:last-child { border-bottom: 0; }
+.hist-tag {
+  font-size: var(--fs-micro); padding: 2px 8px; border-radius: var(--r-sm);
+  color: var(--c-text-2); background: var(--c-hover);
+}
 .hist-tag.current { color: var(--c-primary); background: var(--c-primary-soft); }
-.table-scroll { overflow-x: auto; }
-.row-add { display: flex; gap: 10px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
 .edit-row { display: flex; gap: 10px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
-.fold-tip { font-size: 12px; line-height: 1.7; }
-.pending-sum { margin: 4px 0 12px; font-size: 14px; }
-.pending-sum .muted { font-size: 12px; }
-.preset-preview { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--c-border); border-radius: 6px; }
+.preset-preview {
+  margin-top: 12px; padding: 10px 12px; border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm); background: var(--c-surface-2);
+}
 .preset-line { font-size: 13px; line-height: 1.9; }
-.rule-notes { margin-top: 10px; border: 1px solid var(--c-border); border-radius: 6px; overflow: hidden; }
+.rule-notes { margin-top: 10px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); overflow: hidden; }
 .rule-note {
-  display: grid; grid-template-columns: 140px 130px 1fr; gap: 10px;
-  padding: 6px 10px; font-size: 12px; border-bottom: 1px solid var(--c-border);
+  display: grid; grid-template-columns: 140px 130px minmax(0, 1fr); gap: 10px;
+  padding: 6px 10px; font-size: var(--fs-caption); border-bottom: 1px solid var(--c-border);
 }
 .rule-note:last-child { border-bottom: 0; }
-.rule-note-head { color: var(--c-text-2); background: var(--c-hover); font-weight: 600; }
+.rule-note-head { color: var(--c-text-2); background: var(--c-surface-2); font-weight: 700; }
 .ytd-head, .ytd-row {
-  display: grid; grid-template-columns: 100px 1fr 1fr 80px;
+  display: grid; grid-template-columns: 100px minmax(0, 1fr) minmax(0, 1fr) 80px;
   gap: 10px; align-items: center; margin-bottom: 8px;
 }
-.ytd-head { font-size: 12px; color: var(--c-text-2); }
+.ytd-head { font-size: var(--fs-caption); color: var(--c-text-2); }
 
 @media (max-width: 900px) {
-  .archive-grid { grid-template-columns: repeat(2, 1fr); }
+  .archive-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
-  .row-add > *, .edit-row > * { flex: 1 1 140px; }
+  .archive-grid { gap: 10px 12px; }
+  .arch-item b { font-size: 13px; }
+  .settings-row > *, .edit-row > * { flex: 1 1 140px; }
   .rule-note { grid-template-columns: 1fr 1fr; }
   .rule-note > :last-child { grid-column: 1 / -1; }
   .ytd-head { display: none; }
-  .ytd-row { grid-template-columns: 80px 1fr 1fr; }
+  .ytd-row { grid-template-columns: 80px minmax(0, 1fr) minmax(0, 1fr); }
   .ytd-row > :last-child { grid-column: 1 / -1; }
+  .form-actions { gap: 8px; }
+  .settings-note { font-size: var(--fs-micro); }
 }
 </style>

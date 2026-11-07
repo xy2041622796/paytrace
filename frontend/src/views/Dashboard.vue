@@ -1,21 +1,55 @@
 <template>
   <div v-if="loading" class="muted">正在加载档案…</div>
-  <div v-else class="dash">
-    <h2 class="page-title">现金流仪表盘</h2>
-    <p class="muted">
-      推演月份：{{ year }} 年 {{ month }} 月 ·
-      发薪日：每月 {{ cf.effPayDay }} 日（当天到账，遇周末照发） ·
-      固定双休
-    </p>
+  <div v-else class="dash pt-page">
+    <PageHeader eyebrow="概览" title="现金流仪表盘" desc="按当前档案逐日推演本月现金流，把真实余额与预测口径分开呈现">
+      <template #sub>
+        <p class="dash-sub muted">
+          推演月份：{{ year }} 年 {{ month }} 月 ·
+          发薪日：每月 {{ cf.effPayDay }} 日（当天到账，遇周末照发） ·
+          固定双休
+        </p>
+      </template>
+      <template #actions>
+        <n-button size="tiny" quaternary :loading="refreshing" @click="forceRefresh">强制刷新</n-button>
+      </template>
+    </PageHeader>
+
+    <div class="cache-bar">
+      <span class="muted">档案更新于 {{ cacheTime }}（本地缓存 12 小时）</span>
+      <span v-if="refreshing" class="refresh-dot is-spinning" aria-hidden="true" />
+    </div>
+
+    <n-alert v-if="!app.salaryConfig" type="warning" :bordered="false" class="empty-alert stagger-in">
+      还没有薪资档案，下方数字仅为占位推演。请先到「档案配置」填写税前月薪与社保基数。
+    </n-alert>
+
+    <!-- 还款到期提醒：提前 3 天 / 1 天 / 当天 / 逾期 -->
+    <n-alert
+      v-if="repayReminders.length"
+      :type="repayReminders.some((r) => r.days < 0) ? 'error' : 'warning'"
+      :bordered="false"
+      class="repay-alert stagger-in"
+    >
+      <template #header>还款提醒（{{ repayReminders.length }} 笔）</template>
+      <div v-for="r in repayReminders" :key="r.id" class="remind-row">
+        <b :class="{ 'text-danger': r.days < 0 }">
+          {{ r.days < 0 ? `已逾期 ${-r.days} 天` : r.days === 0 ? '今天到期' : `还有 ${r.days} 天` }}
+        </b>
+        <span> · {{ r.due_date }} · {{ formatMoney(r.amount) }}</span>
+        <span v-if="r.status === 'overdue'" class="text-danger"> · 已标记逾期</span>
+      </div>
+      <div class="muted">到期前 3 天、1 天与当天在此提醒；还完请到「档案配置 → 还款日历」标记已还。</div>
+    </n-alert>
 
     <!-- 首屏：「现在还剩多少」。真实余额由用户维护，与推演值严格分开摆放 -->
-    <div class="hero card">
+    <div class="pt-section-label">资金总览 · 现在还剩多少</div>
+    <SectionCard accent class="hero">
       <div class="hero-main">
         <Mascot :level="balanceLevel" :size="88" />
         <div class="hero-text">
           <div class="hero-kicker">
             现在还剩
-            <span class="hero-badge">真实余额 · 你说了算</span>
+            <StatusChip tone="primary">真实余额 · 你说了算</StatusChip>
           </div>
           <div v-if="!editingBalance" class="hero-amount">
             <span v-if="currentBalance.value == null" class="hero-empty">还没填过</span>
@@ -44,20 +78,19 @@
           想让预测贴近现实，点一下「设为推演期初」。
         </div>
       </div>
-    </div>
+    </SectionCard>
 
     <!-- 余额变动台账：每一次金额变化都留痕，可逐条核对 -->
-    <div class="card log-card">
+    <SectionCard class="log-card" title="余额变动记录" icon="listCheck">
       <div class="log-head" @click="showLog = !showLog">
-        <b>余额变动记录</b>
         <span class="muted">共 {{ balanceLog.length }} 条 · 每次变动都留痕</span>
-        <span class="log-check" :class="logCheck.count === 0 ? 'is-pending' : (logCheck.chainOk && logCheck.consistent ? 'is-ok' : 'is-bad')">
+        <StatusChip class="log-check" :class="logCheck.count === 0 ? 'is-pending' : (logCheck.chainOk && logCheck.consistent ? 'is-ok' : 'is-bad')" tone="success">
           {{ logCheck.count === 0 ? '待建立基线' : (logCheck.chainOk && logCheck.consistent ? '核对一致' : '核对异常') }}
-        </span>
+        </StatusChip>
         <span class="log-toggle">{{ showLog ? '收起' : '展开' }}</span>
       </div>
       <div v-if="showLog" class="log-body">
-        <div v-if="!logRows.length" class="muted log-empty">还没有记录。第一次更新余额时会建立基线。</div>
+        <EmptyState v-if="!logRows.length" text="还没有记录。第一次更新余额时会建立基线。" icon="inbox" />
         <div v-for="r in logRows" :key="r.id" class="log-row">
           <span class="log-at">{{ r.at }}</span>
           <span class="log-kind" :class="'k-' + r.kind">{{ kindLabel[r.kind] || '变动' }}</span>
@@ -80,109 +113,79 @@
           {{ logCheck.count === 0 ? '尚无基线记录' : (logCheck.consistent ? '两者一致' : '不一致，请检查') }}；金额按「分」计算，差额逐条可核对。
         </div>
       </div>
-    </div>
-
-    <div class="cache-bar">
-      <span class="muted">档案更新于 {{ cacheTime }}（本地缓存 12 小时）</span>
-      <span v-if="refreshing" class="refresh-dot is-spinning" aria-hidden="true" />
-      <n-button size="tiny" quaternary :loading="refreshing" @click="forceRefresh">强制刷新</n-button>
-    </div>
-
-    <n-alert v-if="!app.salaryConfig" type="warning" :bordered="false" class="empty-alert">
-      还没有薪资档案，下方数字仅为占位推演。请先到「档案配置」填写税前月薪与社保基数。
-    </n-alert>
-
-    <!-- 还款到期提醒：提前 3 天 / 1 天 / 当天 / 逾期 -->
-    <n-alert
-      v-if="repayReminders.length"
-      :type="repayReminders.some((r) => r.days < 0) ? 'error' : 'warning'"
-      :bordered="false"
-      class="repay-alert"
-    >
-      <template #header>还款提醒（{{ repayReminders.length }} 笔）</template>
-      <div v-for="r in repayReminders" :key="r.id" class="remind-row">
-        <b :class="{ 'text-danger': r.days < 0 }">
-          {{ r.days < 0 ? `已逾期 ${-r.days} 天` : r.days === 0 ? '今天到期' : `还有 ${r.days} 天` }}
-        </b>
-        <span> · {{ r.due_date }} · {{ formatMoney(r.amount) }}</span>
-        <span v-if="r.status === 'overdue'" class="text-danger"> · 已标记逾期</span>
-      </div>
-      <div class="muted">到期前 3 天、1 天与当天在此提醒；还完请到「档案配置 → 还款日历」标记已还。</div>
-    </n-alert>
-
-    <!-- 推演起点：模型从月初 1 号起算用的假设值，与首屏「现在还剩」是两个概念 -->
-    <div class="card core-config">
-      <div class="field-label">推演起点 · 期初余额（月初 1 号的假设值，不是你现在手里的钱）</div>
-      <div class="core-row">
-        <n-input-number v-model:value="startBalance" :min="0" size="small" style="width:160px" />
-        <span class="muted core-hint">下面的预测都从这个数开始算；想用真实余额，点首屏「设为推演期初」。</span>
-      </div>
-    </div>
+    </SectionCard>
 
     <!-- 核心指标：一眼可见的最重要的四个数 -->
-    <div class="stats">
-      <div class="stat card">
-        <div class="stat-label">月到手（当前）</div>
-        <div class="stat-value text-primary">{{ formatMoney(netNow.net) }}</div>
-      </div>
-      <div class="stat card">
-        <div class="stat-label">月末预计余额</div>
-        <div class="stat-value">{{ formatMoney(cf.monthEnd) }}</div>
-      </div>
-      <div class="stat card">
-        <div class="stat-label">月内最低余额</div>
-        <div class="stat-value" :class="cf.monthMin < 0 ? 'text-danger' : ''">{{ formatMoney(cf.monthMin) }}</div>
-      </div>
-      <div class="stat card">
-        <div class="stat-label">现金转负日</div>
-        <div class="stat-value" :class="cf.negativeFrom ? 'text-danger' : 'text-success'">
-          {{ cf.negativeFrom ? `${month}月${cf.negativeFrom}日` : '无' }}
-        </div>
-      </div>
+    <div class="pt-section-label">本月推演 · 逐日现金流</div>
+    <div class="pt-stats">
+      <StatCard label="月到手（当前）" tone="primary">
+        <span class="text-primary">{{ formatMoney(netNow.net) }}</span>
+      </StatCard>
+      <StatCard label="月末预计余额" tone="info">
+        {{ formatMoney(cf.monthEnd) }}
+      </StatCard>
+      <StatCard label="月内最低余额" tone="danger">
+        <span :class="cf.monthMin < 0 ? 'text-danger' : ''">{{ formatMoney(cf.monthMin) }}</span>
+      </StatCard>
+      <StatCard label="现金转负日" tone="danger">
+        <span :class="cf.negativeFrom ? 'text-danger' : 'text-success'">{{ cf.negativeFrom ? `${month}月${cf.negativeFrom}日` : '无' }}</span>
+      </StatCard>
     </div>
 
-    <!-- 核心：现金走势 -->
-    <div class="card chart-card">
-      <div class="card-title">现金余额走势（逐日 · 多薪资情景）</div>
-      <CashflowTimeline
-        :dates="cf.dates"
-        :day-types="cf.dayTypes"
-        :events="cf.events"
-        :series="cf.series"
-        :main-label="cf.mainLabel"
-      />
-      <div class="legend">
-        <span><i class="lg lg-pay" /> 发薪到账</span>
-        <span><i class="lg lg-rep" /> 还款扣款</span>
-        <span><i class="lg lg-exp" /> 固定开支</span>
-        <span><i class="lg lg-zero" /> 零线</span>
-      </div>
-      <div class="type-tip muted">节点日历属性（悬停查看）：工作日 / 周末 / 法定节假日 / 调休补班</div>
-    </div>
+    <div class="pt-grid-side">
+      <!-- 核心：现金走势 -->
+      <SectionCard class="chart-card" title="现金余额走势（逐日 · 多薪资情景）" icon="chart">
+        <CashflowTimeline
+          :dates="cf.dates"
+          :day-types="cf.dayTypes"
+          :events="cf.events"
+          :series="cf.series"
+          :main-label="cf.mainLabel"
+        />
+        <div class="pt-legend">
+          <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--success" /> 发薪到账</span>
+          <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--danger" /> 还款扣款</span>
+          <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--warning" /> 固定开支</span>
+          <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--info" /> 零线</span>
+        </div>
+        <div class="type-tip muted">节点日历属性（悬停查看）：工作日 / 周末 / 法定节假日 / 调休补班</div>
+      </SectionCard>
 
-    <!-- 只读口径卡：把「数字怎么来的」摊开给用户看，不提供任何编辑入口 -->
-    <div class="card caliber-card">
-      <div class="card-title">推演口径（只读）</div>
-      <div class="caliber-grid">
-        <div class="caliber-item">
-          <div class="field-label">公司用工附加成本</div>
-          <div class="ro">{{ formatMoney(companyCost) }}</div>
-          <div class="muted caliber-note">公司缴纳的社保 / 公积金合计，不从工资里扣，仅作用工成本参考。</div>
-        </div>
-        <div class="caliber-item">
-          <div class="field-label">社保比例来源</div>
-          <div class="ro">{{ insuranceSourceLabel }}</div>
-          <div class="muted caliber-note">{{ insuranceSourceNote }}</div>
-        </div>
-        <div class="caliber-item">
-          <div class="field-label">月固定开支口径</div>
-          <div class="ro">{{ expenseSpreadLabel }}</div>
-          <div class="muted caliber-note">{{ expenseSpreadNote }}</div>
-        </div>
+      <div class="pt-stack">
+        <!-- 推演起点：模型从月初 1 号起算用的假设值，与首屏「现在还剩」是两个概念 -->
+        <SectionCard class="core-config" title="推演起点" icon="target" muted>
+          <div class="field-label">推演起点 · 期初余额（月初 1 号的假设值，不是你现在手里的钱）</div>
+          <div class="core-row">
+            <n-input-number v-model:value="startBalance" :min="0" size="small" style="width:160px" />
+            <span class="muted core-hint">下面的预测都从这个数开始算；想用真实余额，点首屏「设为推演期初」。</span>
+          </div>
+        </SectionCard>
+
+        <!-- 只读口径卡：把「数字怎么来的」摊开给用户看，不提供任何编辑入口 -->
+        <SectionCard class="caliber-card" title="推演口径（只读）" icon="book">
+          <div class="caliber-grid">
+            <div class="caliber-item">
+              <div class="field-label">公司用工附加成本</div>
+              <div class="ro">{{ formatMoney(companyCost) }}</div>
+              <div class="muted caliber-note">公司缴纳的社保 / 公积金合计，不从工资里扣，仅作用工成本参考。</div>
+            </div>
+            <div class="caliber-item">
+              <div class="field-label">社保比例来源</div>
+              <div class="ro">{{ insuranceSourceLabel }}</div>
+              <div class="muted caliber-note">{{ insuranceSourceNote }}</div>
+            </div>
+            <div class="caliber-item">
+              <div class="field-label">月固定开支口径</div>
+              <div class="ro">{{ expenseSpreadLabel }}</div>
+              <div class="muted caliber-note">{{ expenseSpreadNote }}</div>
+            </div>
+          </div>
+        </SectionCard>
       </div>
     </div>
 
     <!-- 次要内容统一折叠收纳 -->
+    <div class="pt-section-label">风险提示 · 情景试算 · 前瞻</div>
     <n-collapse :default-expanded-names="['risk']" class="dash-collapse">
       <n-collapse-item title="风险提示" name="risk">
         <template #header-extra>
@@ -191,11 +194,11 @@
         <div
           v-for="w in cf.warnings"
           :key="w.kind + w.date"
-          class="risk-item"
+          class="dash-risk"
           :class="'lv-' + w.level"
         >
           <div class="risk-head">
-            <span class="risk-tag">{{ levelLabel[w.level] }}</span>
+            <StatusChip tone="danger">{{ levelLabel[w.level] }}</StatusChip>
             <b>{{ w.title }}</b>
             <span class="risk-date">{{ w.date }}</span>
           </div>
@@ -285,7 +288,7 @@
           </div>
         </div>
         <div class="forecast-list">
-          <div v-for="m in forecast" :key="m.label" class="forecast-item" :class="'lv-' + m.riskLevel">
+          <div v-for="m in forecast" :key="m.label" class="dash-fc" :class="'lv-' + m.riskLevel">
             <div class="fc-head"><b>{{ m.label }}</b><span class="fc-tag">{{ m.topRisk || '无风险' }}</span></div>
             <div class="fc-row"><span>月末结余</span><b :class="m.endBalance < 0 ? 'text-danger' : ''">{{ formatMoney(m.endBalance) }}</b></div>
             <div class="fc-row"><span>月内最低</span><b>{{ formatMoney(m.minBalance) }}</b></div>
@@ -555,135 +558,47 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
-.cache-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+/* 页头补充信息（PageHeader #sub） */
+.dash-sub { font-size: var(--fs-caption); color: var(--c-text-3); margin: 6px 0 0; line-height: 1.7; }
+
+/* 缓存条 / 刷新指示 */
+.cache-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
 .cache-bar .muted { font-size: 12px; }
-.empty-alert { margin: 14px 0; }
-.repay-alert {
-  margin: 14px 0;
-  animation: dash-alert-in var(--dur-base) var(--ease-out) backwards;
-}
-.remind-row { font-size: 13px; line-height: 1.9; }
 .refresh-dot {
   width: 9px; height: 9px; flex-shrink: 0;
   border-radius: 50%;
-  border: 2px solid var(--c-primary-soft);
+  border: 2px solid var(--c-primary-soft-2);
   border-top-color: var(--c-primary);
 }
-@keyframes dash-alert-in {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.core-config { margin: 14px 0; }
-.core-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.core-hint { font-size: 12px; line-height: 1.6; }
-.config-row { display: flex; gap: 24px; margin: 6px 0; flex-wrap: wrap; align-items: flex-end; }
-.cfg-item { display: flex; flex-direction: column; gap: 6px; }
-.ro { font-size: 16px; font-weight: 600; padding: 2px 0; }
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 14px 0; }
-.stat-label { font-size: 12px; color: var(--c-text-2); margin-bottom: 8px; }
-.stat-value { font-size: 19px; font-weight: 600; word-break: break-all; }
-.chart-card { margin-bottom: 14px; }
-.card-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
-.fc-tip { margin-top: 8px; font-size: 12px; line-height: 1.6; }
+.empty-alert { margin: 14px 0; }
+.repay-alert { margin: 14px 0; }
+.remind-row { font-size: 13px; line-height: 1.9; }
 
-.caliber-card { margin-bottom: 14px; }
-.caliber-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.caliber-item { min-width: 0; }
-.caliber-item .ro { color: var(--c-text); }
-.caliber-note { font-size: 12px; line-height: 1.6; margin-top: 4px; }
-.tier-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tier-row .muted { font-size: 12px; }
-.bonus-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.bonus-tools .muted { font-size: 12px; }
-.bonus-result {
-  margin-top: 12px; padding: 12px 14px;
-  border: 1px dashed var(--c-warning); border-radius: var(--radius-sm);
-  background: rgba(245, 158, 11, .06);
-}
-.bonus-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.trial-badge {
-  font-size: 11px; padding: 2px 8px; border-radius: 4px;
-  color: var(--c-warning); background: rgba(245, 158, 11, .16);
-}
-.bonus-row {
-  display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
-  font-size: 13px; padding: 4px 0; color: var(--c-text-2);
-}
-.bonus-row b { color: var(--c-text); word-break: break-all; }
-
-.legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--c-text-2); flex-wrap: wrap; }
-.legend .lg { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
-.lg-pay { background: var(--c-success); }
-.lg-rep { background: var(--c-danger); }
-.lg-exp { background: var(--c-warning); }
-.lg-zero { background: var(--c-text-3); }
-.type-tip { margin-top: 8px; font-size: 12px; }
-.dash-collapse { margin-top: 4px; }
-
-.risk-item {
-  border: 1px solid var(--c-border);
-  border-left: 3px solid var(--c-border);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-  margin-bottom: 10px;
-}
-.risk-item.lv-red { border-left-color: var(--c-danger); }
-.risk-item.lv-orange { border-left-color: var(--c-warning); }
-.risk-item.lv-yellow { border-left-color: var(--c-warning-text); }
-.risk-item.lv-info { border-left-color: var(--c-success); }
-.risk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.risk-head b { font-size: 14px; }
-.risk-tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; }
-.lv-red .risk-tag { color: var(--c-danger); background: rgba(239, 68, 68, .12); }
-.lv-orange .risk-tag { color: var(--c-warning); background: rgba(245, 158, 11, .14); }
-.lv-yellow .risk-tag { color: var(--c-warning-text); background: rgba(234, 179, 8, .16); }
-.lv-info .risk-tag { color: var(--c-success); background: rgba(16, 185, 129, .12); }
-.risk-date { margin-left: auto; font-size: 12px; color: var(--c-text-3); }
-.risk-detail { font-size: 13px; color: var(--c-text-2); margin-top: 6px; line-height: 1.6; }
-.risk-advice { font-size: 13px; color: var(--c-text); margin-top: 4px; line-height: 1.6; }
-.text-warning { color: var(--c-warning); }
-
-.cushion-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-.cushion-tools .muted { font-size: 12px; }
-.cushion-track { height: 10px; border-radius: 5px; background: var(--c-hover); overflow: hidden; }
-.cushion-fill { height: 100%; border-radius: 5px; background: var(--c-success); transition: width .25s ease; }
-.cushion-row { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
-
-.forecast-tools { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
-.recurring { display: flex; align-items: center; gap: 8px; }
-.recurring .muted { font-size: 12px; }
-.forecast-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.forecast-item {
-  border: 1px solid var(--c-border);
-  border-left: 3px solid var(--c-border);
-  border-radius: var(--radius-sm);
-  padding: 12px;
-}
-.forecast-item.lv-red { border-left-color: var(--c-danger); }
-.forecast-item.lv-orange { border-left-color: var(--c-warning); }
-.forecast-item.lv-yellow { border-left-color: var(--c-warning-text); }
-.forecast-item.lv-info { border-left-color: var(--c-success); }
-.fc-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
-.fc-head b { font-size: 14px; }
-.fc-tag { font-size: 11px; color: var(--c-text-3); text-align: right; }
-.fc-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 3px 0; color: var(--c-text-2); }
-.fc-row b { color: var(--c-text); font-weight: 600; }
-.fc-note { margin-top: 6px; font-size: 11px; color: var(--c-danger); }
-.tip { font-size: 12px; margin-top: 14px; }
+/* 首屏 Hero：accent 渐变由全局 .pt-card--accent 提供，这里只管版式 */
+.hero { margin: 0 0 16px; padding: 18px 20px; border-radius: var(--radius-lg); overflow: hidden; }
+.hero-main { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.hero-text { flex: 1; min-width: 220px; }
+.hero-kicker { font-size: 13px; color: var(--c-text-2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hero-amount { font-size: 40px; font-weight: 700; line-height: 1.25; font-variant-numeric: tabular-nums; letter-spacing: -.5px; }
+.hero-unit { font-size: 15px; font-weight: 500; color: var(--c-text-3); margin-left: 6px; }
+.hero-empty { font-size: 26px; font-weight: 600; color: var(--c-text-3); }
+.hero-edit { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+.hero-line { font-size: 13px; color: var(--c-text-2); margin-top: 2px; }
+.hero-updated { font-size: 11px; margin-top: 4px; }
+.hero-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+.hero-compare { display: flex; gap: 26px; flex-wrap: wrap; align-items: center; margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--c-border); }
+.hc-note { font-size: 12px; color: var(--c-text-3); line-height: 1.7; }
 
 /* 余额变动台账 */
-.log-card { margin: 0 0 14px; padding: 14px 18px; }
+.log-card { padding: 14px 18px; }
 .log-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; cursor: pointer; font-size: 13px; }
-.log-head b { font-size: 14px; }
 .log-head .muted { font-size: 12px; }
-.log-check { font-size: 11px; padding: 2px 9px; border-radius: 999px; }
-.log-check.is-ok { color: var(--c-success); background: rgba(16,185,129,.12); }
-.log-check.is-bad { color: var(--c-danger); background: rgba(239,68,68,.12); }
-.log-check.is-pending { color: var(--c-warning-text); background: rgba(245,158,11,.16); }
+.log-check { font-size: 11px; }
+.log-check.is-ok { color: var(--c-success); background: var(--c-success-soft); }
+.log-check.is-bad { color: var(--c-danger); background: var(--c-danger-soft); }
+.log-check.is-pending { color: var(--c-warning-text); background: var(--c-warning-soft); }
 .log-toggle { margin-left: auto; font-size: 12px; color: var(--c-primary); }
 .log-body { margin-top: 12px; border-top: 1px solid var(--c-border); padding-top: 10px; }
-.log-empty { font-size: 12px; padding: 6px 0; }
 .log-row {
   display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
   font-size: 12px; padding: 7px 0; border-bottom: 1px dashed var(--c-border);
@@ -697,65 +612,86 @@ onBeforeUnmount(() => {
 .log-change em { font-style: normal; margin-left: 6px; font-weight: 600; }
 .log-reason { color: var(--c-text-2); flex: 1; min-width: 160px; }
 .log-foot { font-size: 11px; line-height: 1.7; margin-top: 10px; }
-@media (max-width: 768px) {
-  .log-card { padding: 12px; }
-  .log-toggle { margin-left: 0; }
-}
 
-/* 首屏「现在还剩多少」：圆润底色 + 状态伙伴 + 预测对照 */
-.hero {
-  margin: 16px 0 14px;
-  padding: 18px 20px;
-  border-radius: var(--radius-lg);
-  background:
-    radial-gradient(circle at 88% -20%, var(--c-primary-soft) 0%, transparent 55%),
-    var(--c-surface);
-  overflow: hidden;
+/* 推演起点 / 口径 / 走势：夹在全局 grid 里，去掉卡片自带下边距 */
+.chart-card, .core-config, .caliber-card { margin-bottom: 0; }
+.core-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.core-hint { font-size: 12px; line-height: 1.6; }
+.ro { font-size: 16px; font-weight: 600; padding: 2px 0; }
+.caliber-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.caliber-item { min-width: 0; }
+.caliber-item .ro { color: var(--c-text); }
+.caliber-note { font-size: 12px; line-height: 1.6; margin-top: 4px; }
+.type-tip { margin-top: 8px; font-size: 12px; }
+
+/* 情景试算 / 补贴 / 备用金 / 前瞻 */
+.config-row { display: flex; gap: 24px; margin: 6px 0; flex-wrap: wrap; align-items: flex-end; }
+.cfg-item { display: flex; flex-direction: column; gap: 6px; }
+.tier-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tier-row .muted { font-size: 12px; }
+.fc-tip { margin-top: 8px; font-size: 12px; line-height: 1.6; }
+.bonus-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bonus-tools .muted { font-size: 12px; }
+.bonus-result {
+  margin-top: 12px; padding: 12px 14px;
+  border: 1px dashed var(--c-warning); border-radius: var(--radius-sm);
+  background: var(--c-warning-soft);
 }
-.hero-main { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
-.hero-text { flex: 1; min-width: 220px; }
-.hero-kicker { font-size: 13px; color: var(--c-text-2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.hero-badge {
-  font-size: 11px; padding: 2px 9px; border-radius: 999px;
-  color: var(--c-primary); background: var(--c-primary-soft);
+.bonus-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.trial-badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; color: var(--c-warning-text); background: var(--c-warning-soft); }
+.bonus-row { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; padding: 4px 0; color: var(--c-text-2); }
+.bonus-row b { color: var(--c-text); word-break: break-all; }
+.cushion-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.cushion-tools .muted { font-size: 12px; }
+.cushion-track { height: 10px; border-radius: var(--r-pill); background: var(--c-hover); overflow: hidden; }
+.cushion-fill { height: 100%; border-radius: var(--r-pill); background: var(--c-success); transition: width var(--dur-base) var(--ease-out); }
+.cushion-row { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+.dash-collapse { margin-top: 4px; }
+.forecast-tools { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.recurring { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.recurring .muted { font-size: 12px; }
+.forecast-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+/* 风险卡与前瞻卡：左侧色条按等级区分 */
+.dash-risk, .dash-fc {
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-border-strong);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: var(--c-surface-2);
 }
-.hero-amount {
-  font-size: 40px; font-weight: 700; line-height: 1.25;
-  font-variant-numeric: tabular-nums; letter-spacing: -.5px;
-  animation: pop-in var(--dur-slow) var(--ease-out) backwards;
-}
-.hero-unit { font-size: 15px; font-weight: 500; color: var(--c-text-3); margin-left: 6px; }
-.hero-empty { font-size: 26px; font-weight: 600; color: var(--c-text-3); }
-.hero-edit { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
-.hero-line { font-size: 13px; color: var(--c-text-2); margin-top: 2px; }
-.hero-updated { font-size: 11px; margin-top: 4px; }
-.hero-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
-.hero-compare {
-  display: flex; gap: 26px; flex-wrap: wrap; align-items: center;
-  margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--c-border);
-}
-.hc-item { display: flex; flex-direction: column; gap: 2px; }
-.hc-item span { font-size: 12px; color: var(--c-text-3); }
-.hc-item b { font-size: 17px; font-variant-numeric: tabular-nums; }
-.hc-item small { font-size: 11px; color: var(--c-text-3); }
-.hc-note { font-size: 12px; color: var(--c-text-3); line-height: 1.7; }
-@media (max-width: 768px) {
-  .hero { padding: 14px; }
-  .hero-amount { font-size: 32px; }
-  .hero-actions { flex-direction: row; }
-  .hc-note { margin-left: 0; }
-}
+.dash-fc { padding: 12px; }
+.dash-risk.lv-red, .dash-fc.lv-red { border-left-color: var(--c-danger); }
+.dash-risk.lv-orange, .dash-fc.lv-orange { border-left-color: var(--c-warning); }
+.dash-risk.lv-yellow, .dash-fc.lv-yellow { border-left-color: var(--c-warning-text); }
+.dash-risk.lv-info, .dash-fc.lv-info { border-left-color: var(--c-success); }
+.risk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.risk-head b { font-size: 14px; }
+.risk-date { margin-left: auto; font-size: 12px; color: var(--c-text-3); }
+.risk-detail { font-size: 13px; color: var(--c-text-2); margin-top: 6px; line-height: 1.6; }
+.risk-advice { font-size: 13px; color: var(--c-text); margin-top: 4px; line-height: 1.6; }
+.fc-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.fc-head b { font-size: 14px; }
+.fc-tag { font-size: 11px; color: var(--c-text-3); text-align: right; }
+.fc-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 3px 0; color: var(--c-text-2); }
+.fc-row b { color: var(--c-text); font-weight: 600; }
+.fc-note { margin-top: 6px; font-size: 11px; color: var(--c-danger); }
+.tip { font-size: 12px; margin-top: 14px; line-height: 1.7; }
 
 @media (max-width: 900px) {
-  .stats { grid-template-columns: repeat(2, 1fr); }
   .forecast-list { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 768px) {
+  .log-card { padding: 12px; }
+  .log-toggle { margin-left: 0; }
+  .hero { padding: 14px; }
+  .hero-amount { font-size: 32px; }
+  .hero-actions { flex-direction: row; }
   .config-row { gap: 14px; }
-  .stat-value { font-size: 17px; }
   .risk-date { margin-left: 0; }
   .forecast-list { grid-template-columns: 1fr; }
-  .caliber-grid { grid-template-columns: 1fr; gap: 12px; }
-  .tip { line-height: 1.7; }
+  .caliber-grid { gap: 10px; }
+  .bonus-row, .cushion-row, .fc-row { flex-wrap: wrap; }
 }
 </style>

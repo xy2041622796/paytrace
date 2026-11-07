@@ -15,6 +15,7 @@
 ```
 paytrace/
 ├─ README.md                          # 本文件（项目说明）
+├─ REDESIGN_NOTES.md                  # 全项目 UI 重设计：逐页走查、设计规范、改动说明与验证结果
 ├─ CONVERSATION_HANDOFF.md            # 对话交接文档（历史 18 轮，§19 为 2026-11-05 本轮）
 ├─ 薪资现金流管理产品_PRD.md           # PRD v1.2（FR-01~17 + 第十六章偏差核对）
 ├─ product_baseline.json              # 真实数据语义化基准（武汉江汉区社保口径、字段含义）
@@ -49,12 +50,13 @@ paytrace/
 
 ```bash
 cd frontend
-cp .env.example .env        # 已有 .env 可跳过；填入 Supabase URL 与 anon key
 npm ci                      # 用现有 package-lock.json，零新增依赖
-npm run dev                 # http://localhost:5173
+npm run dev                 # http://localhost:5173（端口占用时自动顺延）
 ```
 
-`.env` 只需两个变量：
+> **零配置可运行**：未填 `.env` 时前端自动进入「本地演示模式」（`src/lib/demo.js`），预置与真实种子一致的业务数据，可直接走查全部 9 个页面与增删改查；数据仅存浏览器 localStorage。侧边栏会显示「演示模式」标识。需要接入真实后端时再执行 `cp .env.example .env` 并填值，配置后走原生 Supabase SDK。
+
+`.env`（可选）只需两个变量：
 
 ```
 VITE_SUPABASE_URL=https://xxxx.supabase.co

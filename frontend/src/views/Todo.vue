@@ -1,26 +1,31 @@
 <template>
   <div class="todo">
-    <h2 class="page-title">待办事项</h2>
-    <p class="muted">记录还款提醒、补贴申报、账单到期等事项，关联日期后会自动按紧急程度置顶。</p>
+    <PageHeader
+      eyebrow="管理"
+      title="待办事项"
+      desc="记录还款提醒、补贴申报、账单到期等事项，关联日期后会自动按紧急程度置顶。"
+    />
 
     <n-alert v-if="overdueCount || soonCount" type="warning" :bordered="false" class="todo-alert">
       有 {{ overdueCount }} 项已逾期、{{ soonCount }} 项 3 天内到期，已排在最前面。
     </n-alert>
 
-    <div class="add">
-      <n-input v-model:value="newTitle" placeholder="待办内容（如 11月25日还白条）" style="width:260px" />
-      <n-date-picker v-model:value="newDate" type="date" clearable placeholder="关联日期（可选）" />
-      <n-button type="primary" @click="add">添加</n-button>
-    </div>
+    <SectionCard title="待办清单" icon="listCheck">
+      <div class="add">
+        <n-input v-model:value="newTitle" placeholder="待办内容（如 11月25日还白条）" style="width:260px" />
+        <n-date-picker v-model:value="newDate" type="date" clearable placeholder="关联日期（可选）" />
+        <n-button type="primary" @click="add">添加</n-button>
+      </div>
 
-    <div class="table-scroll">
-      <n-data-table
-        :columns="cols" :data="displayTodos" :row-props="rowProps"
-        :bordered="false" size="small" :scroll-x="940"
-      />
-    </div>
-    <p v-if="!displayTodos.length" class="muted empty">暂无待办事项，添加一条开始规划吧。</p>
-    <p class="muted linked-tip">带「还款日历」标签的待办由还款账单自动生成，仅本地计算、不写入待办清单；点按可跳转还款日历。</p>
+      <div class="table-scroll">
+        <n-data-table
+          :columns="cols" :data="displayTodos" :row-props="rowProps"
+          :bordered="false" size="small" :scroll-x="940"
+        />
+      </div>
+      <EmptyState v-if="!displayTodos.length" text="暂无待办事项，添加一条开始规划吧。" icon="inbox" />
+      <p class="pt-note linked-note">带「还款日历」标签的待办由还款账单自动生成，仅本地计算、不写入待办清单；点按可跳转还款日历。</p>
+    </SectionCard>
   </div>
 </template>
 
@@ -225,20 +230,26 @@ onMounted(load)
 </script>
 
 <style scoped>
-.page-title { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
-.todo-alert { margin: 14px 0; }
-.add { display: flex; gap: 10px; margin: 16px 0; align-items: center; flex-wrap: wrap; }
-.table-scroll { overflow-x: auto; }
-.empty { margin-top: 14px; font-size: 13px; }
-.linked-tip { margin-top: 10px; font-size: 12px; line-height: 1.7; }
-.cell-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* 全局骨架 / 卡片 / 表格 / 空状态 / 语义文字由 theme.css 统一提供，本页只保留特有结构 */
+.todo { min-width: 0; }
+
+.todo-alert { margin: 0 0 var(--sp-4); border-radius: var(--radius-sm); }
+
+.add {
+  display: flex; gap: var(--sp-2); margin: 0 0 var(--sp-4);
+  align-items: center; flex-wrap: wrap;
+}
+
+/* 列渲染器 h() 生成的标题与「还款日历」来源标 */
+.cell-title { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
 .src-tag {
-  font-size: 11px; padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+  font-size: var(--fs-micro); padding: 1px 6px; border-radius: var(--r-xs); flex-shrink: 0;
   background: var(--c-hover); color: var(--c-text-2);
 }
-.text-warning { color: var(--c-warning); }
+
+.linked-note { margin: var(--sp-4) 0 0; }
 
 @media (max-width: 768px) {
-  .add > * { flex: 1 1 140px; }
+  .add > * { flex: 1 1 100%; min-width: 0; }
 }
 </style>
