@@ -1,114 +1,125 @@
 <template>
   <div class="ai pt-page">
-    <PageHeader
-      eyebrow="记录"
-      title="智能记账与消费劝导"
-      desc="由智能模型解析，调用密钥只保存在服务端，页面不会接触。解析结果只是草稿，逐条确认后才会写入流水。建议与提醒仅供参考，不构成财务建议，也不承诺任何收益。"
-    />
+    <!-- 页身份：左对齐，与仪表盘/日历的页头刻意不同（更克制，像工具入口） -->
+    <header class="ai-head">
+      <div class="ai-id">
+        <span class="ai-eyebrow">记录 · 工具台</span>
+        <h1 class="ai-title">智能记账与消费劝导</h1>
+      </div>
+      <p class="ai-desc muted">由智能模型解析，调用密钥只保存在服务端，页面不会接触。解析结果只是草稿，逐条确认后才会写入流水。建议与提醒仅供参考，不构成财务建议，也不承诺任何收益。</p>
+    </header>
 
-    <n-tabs type="line" animated>
+    <!-- 双栏工具台：左大白话记账，右购物劝导 —— 不用 tab，两件事并排摆开 -->
+    <div class="ai-bench">
       <!-- 大白话记账 -->
-      <n-tab-pane name="note" tab="大白话记账">
-        <SectionCard title="把一段话变成草稿" desc="一次可描述多笔收支，解析结果只作草稿" icon="sparkles">
-          <n-input
-            v-model:value="noteText"
-            type="textarea"
-            :rows="3"
-            placeholder="用大白话描述，可以一次说多笔：例如「昨天中午快餐45，打车23，晚上买水3块」"
-          />
-          <n-button type="primary" class="act" :loading="parsing" @click="parseNote">智能解析</n-button>
-        </SectionCard>
+      <section class="ai-tool">
+        <div class="tool-head">
+          <span class="tool-ico"><AppIcon name="sparkles" :size="18" /></span>
+          <div>
+            <b>大白话记账</b>
+            <span class="tool-sub">一次可描述多笔收支，解析结果只作草稿</span>
+          </div>
+        </div>
+        <n-input
+          v-model:value="noteText"
+          type="textarea"
+          :rows="3"
+          placeholder="用大白话描述，可以一次说多笔：例如「昨天中午快餐45，打车23，晚上买水3块」"
+        />
+        <n-button type="primary" class="act" :loading="parsing" @click="parseNote">智能解析</n-button>
 
-        <SectionCard title="待确认草稿" desc="逐条核对日期、分类与金额后再写入" icon="listCheck">
-          <div v-if="drafts.length" class="draft-wrap">
-            <div class="draft-bar">
-              <b>待确认清单（{{ drafts.length }} 笔）</b>
-              <span class="muted hint">已勾选 {{ selectedCount }} 笔 · 可写 {{ writableCount }} 笔</span>
-              <div class="bar-actions draft-actions">
-                <n-button size="small" @click="addBlank">添加一笔</n-button>
-                <n-button size="small" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</n-button>
-                <n-button size="small" quaternary type="error" @click="askClear">
-                  {{ clearArmed ? '确认清空？' : '清空清单' }}
-                </n-button>
-              </div>
-            </div>
-
-            <div v-for="(d, i) in drafts" :key="d.id" class="draft card" :class="{ 'is-off': !d.selected }">
-              <div class="draft-head">
-                <label class="pick">
-                  <input v-model="d.selected" type="checkbox" />
-                  <span>第 {{ i + 1 }} 笔</span>
-                </label>
-                <span class="src-tag" :class="d.source === 'ai' ? 'src-ai' : 'src-manual'">
-                  {{ d.source === 'ai' ? '智能解析' : '手动添加' }}
-                </span>
-                <span v-if="isLowConfidence(d)" class="src-tag src-low">置信度偏低，请核对</span>
-                <span v-if="d.dateAdjusted" class="src-tag src-low">日期已修正，请核对</span>
-                <n-button size="tiny" quaternary type="error" @click="removeDraft(d.id)">删除</n-button>
-              </div>
-
-              <div v-if="draftError(d)" class="draft-err">{{ draftError(d) }}</div>
-
-              <div class="edit-grid">
-                <label class="fld">
-                  <span>日期</span>
-                  <input v-model="d.txn_date" type="date" />
-                </label>
-                <label class="fld">
-                  <span>收支方向</span>
-                  <n-select v-model:value="d.direction" :options="directionOptions" size="small" />
-                </label>
-                <label class="fld">
-                  <span>分类</span>
-                  <n-input v-model:value="d.category" size="small" placeholder="自动识别，可修改" />
-                </label>
-                <label class="fld">
-                  <span>金额（元）</span>
-                  <n-input-number v-model:value="d.amount" :min="0" :step="0.01" size="small" placeholder="0.00" />
-                </label>
-                <label class="fld fld-wide">
-                  <span>备注</span>
-                  <n-input v-model:value="d.note" size="small" placeholder="可留空" />
-                </label>
-              </div>
-
-              <div class="draft-foot">
-                <span class="muted hint">金额：{{ formatMoney(Number(d.amount) || 0) }}</span>
-                <n-button size="small" type="primary" :disabled="!canWrite(d)" :loading="busy" @click="writeDrafts(d.id)">
-                  写入这一笔
-                </n-button>
-              </div>
-            </div>
-
-            <div class="draft-submit">
-              <n-button type="primary" :disabled="!writableCount" :loading="busy" @click="writeDrafts()">
-                写入选中项（{{ writableCount }} 笔）
+        <div v-if="drafts.length" class="draft-wrap">
+          <div class="draft-bar">
+            <b>待确认清单（{{ drafts.length }} 笔）</b>
+            <span class="muted hint">已勾选 {{ selectedCount }} 笔 · 可写 {{ writableCount }} 笔</span>
+            <div class="bar-actions draft-actions">
+              <n-button size="small" @click="addBlank">添加一笔</n-button>
+              <n-button size="small" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</n-button>
+              <n-button size="small" quaternary type="error" @click="askClear">
+                {{ clearArmed ? '确认清空？' : '清空清单' }}
               </n-button>
-              <span class="muted hint">只有校验通过的条目才会写入；未写入的草稿会留在清单里。</span>
             </div>
           </div>
 
-          <EmptyState v-else icon="inbox">还没有草稿。输入一段大白话点「智能解析」，或点下方按钮手动记一笔。</EmptyState>
+          <div v-for="(d, i) in drafts" :key="d.id" class="draft card" :class="{ 'is-off': !d.selected }">
+            <div class="draft-head">
+              <label class="pick">
+                <input v-model="d.selected" type="checkbox" />
+                <span>第 {{ i + 1 }} 笔</span>
+              </label>
+              <span class="src-tag" :class="d.source === 'ai' ? 'src-ai' : 'src-manual'">
+                {{ d.source === 'ai' ? '智能解析' : '手动添加' }}
+              </span>
+              <span v-if="isLowConfidence(d)" class="src-tag src-low">置信度偏低，请核对</span>
+              <span v-if="d.dateAdjusted" class="src-tag src-low">日期已修正，请核对</span>
+              <n-button size="tiny" quaternary type="error" @click="removeDraft(d.id)">删除</n-button>
+            </div>
 
-          <div class="below">
-            <n-button size="small" @click="addBlank">手动添加一笔</n-button>
+            <div v-if="draftError(d)" class="draft-err">{{ draftError(d) }}</div>
+
+            <div class="edit-grid">
+              <label class="fld">
+                <span>日期</span>
+                <input v-model="d.txn_date" type="date" />
+              </label>
+              <label class="fld">
+                <span>收支方向</span>
+                <n-select v-model:value="d.direction" :options="directionOptions" size="small" />
+              </label>
+              <label class="fld">
+                <span>分类</span>
+                <n-input v-model:value="d.category" size="small" placeholder="自动识别，可修改" />
+              </label>
+              <label class="fld">
+                <span>金额（元）</span>
+                <n-input-number v-model:value="d.amount" :min="0" :step="0.01" size="small" placeholder="0.00" />
+              </label>
+              <label class="fld fld-wide">
+                <span>备注</span>
+                <n-input v-model:value="d.note" size="small" placeholder="可留空" />
+              </label>
+            </div>
+
+            <div class="draft-foot">
+              <span class="muted hint">金额：{{ formatMoney(Number(d.amount) || 0) }}</span>
+              <n-button size="small" type="primary" :disabled="!canWrite(d)" :loading="busy" @click="writeDrafts(d.id)">
+                写入这一笔
+              </n-button>
+            </div>
           </div>
-        </SectionCard>
 
+          <div class="draft-submit">
+            <n-button type="primary" :disabled="!writableCount" :loading="busy" @click="writeDrafts()">
+              写入选中项（{{ writableCount }} 笔）
+            </n-button>
+            <span class="muted hint">只有校验通过的条目才会写入；未写入的草稿会留在清单里。</span>
+          </div>
+        </div>
+
+        <EmptyState v-else icon="inbox">还没有草稿。输入一段大白话点「智能解析」，或点下方按钮手动记一笔。</EmptyState>
+
+        <div class="below">
+          <n-button size="small" @click="addBlank">手动添加一笔</n-button>
+        </div>
         <p class="disclaimer">以上解析结果仅为草稿，须经你确认写入；不构成财务建议，也不承诺任何收益。</p>
-      </n-tab-pane>
+      </section>
 
       <!-- 购物劝导 -->
-      <n-tab-pane name="advise" tab="购物劝导">
-        <SectionCard title="想买点什么" desc="结合当月现金流与还款安排给出消费提醒" icon="bulb">
-          <n-input
-            v-model:value="buyText"
-            type="textarea"
-            :rows="2"
-            placeholder="想买什么：例如「想买一双跑步鞋 399 元」"
-          />
-          <n-button type="primary" class="act" :loading="advising" @click="advise">帮我判断</n-button>
-        </SectionCard>
+      <section class="ai-tool">
+        <div class="tool-head">
+          <span class="tool-ico"><AppIcon name="bulb" :size="18" /></span>
+          <div>
+            <b>购物劝导</b>
+            <span class="tool-sub">结合当月现金流与还款安排给出消费提醒</span>
+          </div>
+        </div>
+        <n-input
+          v-model:value="buyText"
+          type="textarea"
+          :rows="3"
+          placeholder="想买什么：例如「想买一双跑步鞋 399 元」"
+        />
+        <n-button type="primary" class="act" :loading="advising" @click="advise">帮我判断</n-button>
 
         <div v-if="advice" class="result card">
           <div class="row kv-row"><span>建议</span><b :class="adviceClass">{{ adviceLabel }}</b></div>
@@ -116,8 +127,9 @@
           <div class="row kv-row"><span>风险等级</span><b>{{ advice.risk_level }}</b></div>
           <div class="disclaimer">{{ advice.disclaimer || '以上仅为消费提醒，不构成财务建议。' }}</div>
         </div>
-      </n-tab-pane>
-    </n-tabs>
+        <div v-else class="ai-advise-empty muted">说出想买的东西，会结合你这个月的现金流与近期还款，告诉你「现在买合不合适」。</div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -327,9 +339,39 @@ async function advise() {
 </script>
 
 <style scoped>
-/* 本页特有：草稿卡紧凑网格、来源标记、校验提示 */
-.ai { min-width: 0; }
+/* 页身份 */
+.ai-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 18px; }
+.ai-id { display: flex; flex-direction: column; gap: 6px; }
+.ai-eyebrow {
+  font-size: var(--fs-micro); font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--c-primary); background: var(--c-primary-soft); border-radius: var(--r-pill);
+  padding: 3px 10px; align-self: flex-start;
+}
+.ai-title { font-size: 26px; font-weight: 750; line-height: 1.2; letter-spacing: -.02em; margin: 0; color: var(--c-text); }
+.ai-desc { font-size: 12.5px; line-height: 1.7; max-width: 460px; }
 
+/* 双栏工具台 */
+.ai-bench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.ai-tool {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.tool-head { display: flex; align-items: center; gap: 11px; }
+.tool-ico {
+  width: 34px; height: 34px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-sm);
+  background: var(--c-primary-soft); color: var(--c-primary);
+}
+.tool-head b { font-size: 15px; font-weight: 700; color: var(--c-text); display: block; }
+.tool-sub { font-size: 11.5px; color: var(--c-text-3); }
+.ai-tool .act { align-self: flex-start; }
+
+/* 草稿清单 */
 .draft-head {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   margin-bottom: 6px;
@@ -376,13 +418,26 @@ async function advise() {
 .draft-submit {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px;
 }
+.draft-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.draft-actions { margin-left: auto; }
 .hint { font-size: var(--fs-caption); }
-.below { margin-top: 10px; }
+.below { margin-top: 4px; }
+.draft-wrap { display: flex; flex-direction: column; gap: 10px; }
 
 .kv-row { flex-wrap: wrap; }
 .kv-row b { word-break: break-all; }
+.result { padding: 16px 18px; }
 
+.ai-advise-empty { font-size: 12.5px; line-height: 1.7; padding: 14px 0; }
+
+.disclaimer { font-size: var(--fs-micro); color: var(--c-text-3); line-height: 1.7; margin: 10px 0 0; }
+
+@media (max-width: 980px) {
+  .ai-bench { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 768px) {
+  .ai-title { font-size: 22px; }
+  .ai-tool { padding: 15px; }
   .edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fld-wide { grid-column: 1 / -1; }
   .draft-actions { margin-left: 0; width: 100%; }

@@ -1,26 +1,42 @@
 <template>
-  <div class="ledger pt-page">
-    <PageHeader
-      eyebrow="记录"
-      title="流水账本"
-      desc="记录每一笔收支，智能记账写入的流水也会汇总到这里。数据仅本人可见。"
-    />
-
-    <!-- 月份与搜索 -->
-    <div class="toolbar card">
-      <div class="tool-item">
-        <div class="field-label">查看月份</div>
-        <n-date-picker v-model:value="selectedMonth" type="month" clearable="false" style="width:150px" />
+  <div class="led pt-page">
+    <!-- 页身份：左对齐，与本月条数同行，不再套用居中页头 -->
+    <header class="led-head">
+      <div class="led-head-main">
+        <span class="led-eyebrow">账本</span>
+        <h1 class="led-title">流水账本</h1>
+        <p class="led-desc">记录每一笔收支，智能记账写入的流水也会汇总到这里。数据仅本人可见。</p>
       </div>
-      <div class="tool-item grow">
-        <div class="field-label">搜索分类 / 备注 / 金额</div>
+      <div class="led-head-side">
+        <StatusChip tone="info">{{ filteredRows.length }} / {{ rows.length }} 条流水</StatusChip>
+      </div>
+    </header>
+
+    <!-- 命令栏：选月份 + 搜索，常驻工作台顶部 -->
+    <div class="led-bar">
+      <div class="led-bar-field">
+        <span class="led-bar-label">查看月份</span>
+        <n-date-picker v-model:value="selectedMonth" type="month" clearable="false" style="width:160px" />
+      </div>
+      <div class="led-bar-field grow">
+        <span class="led-bar-label">搜索分类 / 备注 / 金额</span>
         <n-input v-model:value="keyword" placeholder="如 餐饮、房租、45" clearable />
       </div>
-      <div class="tool-count muted">{{ filteredRows.length }} / {{ rows.length }} 条</div>
     </div>
 
-    <!-- 选中月份汇总 -->
-    <div class="stats">
+    <!-- 记一笔：压成顶部内联操作条，作为全页唯一强调区 -->
+    <div class="led-add">
+      <span class="led-add-kicker">记一笔</span>
+      <n-date-picker v-model:value="form.date" type="date" clearable placeholder="日期" style="width:160px" />
+      <n-select v-model:value="form.direction" :options="directionOptions" style="width:110px" />
+      <n-input v-model:value="form.category" placeholder="分类（如 餐饮）" style="width:150px" />
+      <n-input-number v-model:value="form.amount" :min="0" placeholder="金额" style="width:130px" />
+      <n-input v-model:value="form.note" placeholder="备注（可选）" style="width:170px" />
+      <n-button type="primary" :loading="saving" :disabled="saving" @click="add">保存</n-button>
+    </div>
+
+    <!-- 本月三数：收入 / 支出 / 净额 -->
+    <div class="led-stats">
       <StatCard tone="success">
         <template #label>{{ monthTitle }}收入</template>
         <span class="text-success">{{ formatMoney(monthIncome) }}</span>
@@ -35,22 +51,18 @@
       </StatCard>
     </div>
 
-    <!-- 记一笔 + 支出构成：宽屏主次两栏 -->
-    <div class="pt-section-label">本月概览</div>
-    <div class="pt-grid-side">
-      <!-- 手动记一笔 -->
-      <SectionCard title="记一笔" icon="plus" desc="手动补记一笔收支，备注可自动带出分类">
-        <div class="add-row ledger-row">
-          <n-date-picker v-model:value="form.date" type="date" clearable placeholder="日期" style="width:160px" />
-          <n-select v-model:value="form.direction" :options="directionOptions" style="width:110px" />
-          <n-input v-model:value="form.category" placeholder="分类（如 餐饮）" style="width:150px" />
-          <n-input-number v-model:value="form.amount" :min="0" placeholder="金额" style="width:130px" />
-          <n-input v-model:value="form.note" placeholder="备注（可选）" style="width:170px" />
-          <n-button type="primary" :loading="saving" :disabled="saving" @click="add">保存</n-button>
+    <!-- 主工作区：左流水（主）/ 右支出构成（次） -->
+    <div class="led-split">
+      <SectionCard :title="`${monthTitle}流水`" icon="listCheck" desc="当月全部流水，可导出为表格文件">
+        <div class="table-scroll">
+          <n-data-table :columns="columns" :data="filteredRows" :bordered="false" size="small" :scroll-x="720" />
+        </div>
+        <div class="export-row">
+          <n-button size="small" :disabled="!filteredRows.length || saving" @click="exportCsv">导出为表格文件</n-button>
+          <span class="muted led-hint">导出当前搜索结果为 CSV，可用 Excel / WPS 打开。</span>
         </div>
       </SectionCard>
 
-      <!-- 支出构成 -->
       <SectionCard title="支出构成" icon="chart" desc="按分类看这个月的钱花在哪">
         <EmptyState v-if="!categoryRows.length" text="这个月还没有支出流水。" icon="inbox" />
         <div v-for="c in categoryRows" :key="c.name" class="cat-row">
@@ -61,45 +73,29 @@
       </SectionCard>
     </div>
 
-    <!-- 待收收入 + 当月流水 -->
-    <div class="pt-section-label">待收与流水</div>
-    <div class="pt-grid-2">
-      <!-- 待收收入 -->
-      <SectionCard title="待收收入" icon="coins" desc="未到账收入单独登记，到账后一键写入流水">
-        <div class="pt-note ledger-note">奖金、补贴等尚未到账的钱不计入余额，到账后一键写入流水。未到账 / 审核中计入合计；作废仅作标记、不计入合计，但保留记录可查。</div>
-        <div class="pending-sum">
-          待收合计 <b class="text-primary">{{ formatMoney(pendingTotal) }}</b>
-          <StatusChip tone="info">{{ pendingOpen.length }} 项未到账 / 审核中</StatusChip>
-        </div>
-        <div class="table-scroll">
-          <n-data-table
-            :columns="pendingColumns" :data="pending" :row-props="pendingRowProps"
-            :bordered="false" size="small" :scroll-x="860"
-          />
-        </div>
-        <div class="row-add ledger-row">
-          <n-input v-model:value="newPending.type" placeholder="项目（如 应届生社保补贴）" style="width:190px" />
-          <n-input-number v-model:value="newPending.est_amount" placeholder="预估金额" :min="0" />
-          <n-input v-model:value="newPending.condition" placeholder="到账条件（可选）" style="width:180px" />
-          <n-button type="primary" :disabled="saving" @click="addPending">添加</n-button>
-        </div>
-      </SectionCard>
-
-      <!-- 流水列表 -->
-      <SectionCard :title="`${monthTitle}流水`" icon="listCheck" desc="当月全部流水，可导出为表格文件">
-        <div class="table-scroll">
-          <n-data-table :columns="columns" :data="filteredRows" :bordered="false" size="small" :scroll-x="720" />
-        </div>
-        <div class="export-row">
-          <n-button size="small" :disabled="!filteredRows.length || saving" @click="exportCsv">导出为表格文件</n-button>
-          <span class="muted ledger-hint">导出当前搜索结果为 CSV，可用 Excel / WPS 打开。</span>
-        </div>
-      </SectionCard>
-    </div>
+    <!-- 待收收入：独立状态机，未到账不计入余额 -->
+    <SectionCard class="led-pending" title="待收收入" icon="coins" desc="未到账收入单独登记，到账后一键写入流水">
+      <div class="pt-note ledger-note">奖金、补贴等尚未到账的钱不计入余额，到账后一键写入流水。未到账 / 审核中计入合计；作废仅作标记、不计入合计，但保留记录可查。</div>
+      <div class="pending-sum">
+        待收合计 <b class="text-primary">{{ formatMoney(pendingTotal) }}</b>
+        <StatusChip tone="info">{{ pendingOpen.length }} 项未到账 / 审核中</StatusChip>
+      </div>
+      <div class="table-scroll">
+        <n-data-table
+          :columns="pendingColumns" :data="pending" :row-props="pendingRowProps"
+          :bordered="false" size="small" :scroll-x="860"
+        />
+      </div>
+      <div class="row-add ledger-row">
+        <n-input v-model:value="newPending.type" placeholder="项目（如 应届生社保补贴）" style="width:190px" />
+        <n-input-number v-model:value="newPending.est_amount" placeholder="预估金额" :min="0" />
+        <n-input v-model:value="newPending.condition" placeholder="到账条件（可选）" style="width:180px" />
+        <n-button type="primary" :disabled="saving" @click="addPending">添加</n-button>
+      </div>
+    </SectionCard>
 
     <!-- 月度对账 -->
-    <div class="pt-section-label">核对与校准</div>
-    <SectionCard title="月度对账" icon="shieldCheck" desc="推演结余与实际流水逐笔比对">
+    <SectionCard class="led-recon" title="月度对账" icon="shieldCheck" desc="推演结余与实际流水逐笔比对">
       <div class="pt-note ledger-note">把「按档案推演的全月结余」与「实际已记账的流水」放在一起比对，找出漏记或配置偏差。</div>
       <div class="recon-tools">
         <span class="muted">期初余额（元）</span>
@@ -488,18 +484,111 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 本页特有：待收表格里的删除线与操作按钮组（由 h() 渲染列产生） */
+/* ===== 工作台骨架：左对齐页身份，区别于其他页的居中页头 ===== */
+.led-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.led-eyebrow {
+  display: inline-block;
+  font-size: var(--fs-caption);
+  letter-spacing: .14em;
+  color: var(--c-primary);
+  margin-bottom: 6px;
+}
+.led-title {
+  font-size: var(--fs-display);
+  font-weight: 700;
+  line-height: 1.08;
+  margin: 0;
+  color: var(--c-text);
+}
+.led-desc {
+  margin: 8px 0 0;
+  max-width: 58ch;
+  font-size: var(--fs-body);
+  color: var(--c-text-2);
+  line-height: 1.6;
+}
+.led-head-side { flex-shrink: 0; }
+
+/* ===== 命令栏：月份 + 搜索，常驻工作台顶部 ===== */
+.led-bar {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  padding: 14px 16px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+.led-bar-field { display: flex; flex-direction: column; gap: 6px; }
+.led-bar-field.grow { flex: 1 1 280px; min-width: 220px; }
+.led-bar-label { font-size: var(--fs-caption); color: var(--c-text-2); }
+
+/* ===== 记一笔：全页唯一强调区（accent 表面）===== */
+.led-add {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--c-primary-soft);
+  border: 1px solid var(--c-primary-soft-2);
+  border-radius: 12px;
+  margin-bottom: 18px;
+}
+.led-add-kicker {
+  font-size: var(--fs-section);
+  font-weight: 700;
+  color: var(--c-primary-ink);
+  margin-right: 4px;
+}
+
+/* ===== 本月三数 ===== */
+.led-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+/* ===== 主工作区：左流水（主）/ 右支出构成（次）===== */
+.led-split {
+  display: grid;
+  grid-template-columns: 1.9fr 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+.led-pending,
+.led-recon { margin-bottom: 18px; }
+.led-hint { font-size: var(--fs-caption); }
+
+/* ===== 复用：待收表格里的删除线与操作按钮组 ===== */
 .void-text { text-decoration: line-through; }
 .ops { display: flex; flex-wrap: wrap; gap: 6px; }
 
-/* 对账结论：状态底色统一走语义 token，不再散落 rgba */
+/* 对账结论：状态底色统一走语义 token */
 .ledger-verdict.lv-ok { color: var(--c-success); background: var(--c-success-soft); }
 .ledger-verdict.lv-plus { color: var(--c-primary); background: var(--c-primary-soft); }
 .ledger-verdict.lv-minus { color: var(--c-danger); background: var(--c-danger-soft); }
 
+.ledger-note { font-size: var(--fs-caption); }
 .ledger-hint { font-size: var(--fs-caption); }
 
+@media (max-width: 960px) {
+  .led-split { grid-template-columns: 1fr; }
+  .led-split > * { min-width: 0; }
+}
 @media (max-width: 768px) {
+  .led-stats { grid-template-columns: 1fr; }
   .ledger-row > * { flex: 1 1 140px; }
   .ledger-note { font-size: var(--fs-micro); }
   .ledger-hint { font-size: var(--fs-micro); }

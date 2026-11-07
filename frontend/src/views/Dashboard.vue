@@ -1,23 +1,20 @@
 <template>
   <div v-if="loading" class="muted">正在加载档案…</div>
   <div v-else class="dash pt-page">
-    <PageHeader eyebrow="概览" title="现金流仪表盘" desc="按当前档案逐日推演本月现金流，把真实余额与预测口径分开呈现">
-      <template #sub>
-        <p class="dash-sub muted">
-          推演月份：{{ year }} 年 {{ month }} 月 ·
-          发薪日：每月 {{ cf.effPayDay }} 日（当天到账，遇周末照发） ·
-          固定双休
-        </p>
-      </template>
-      <template #actions>
+    <!-- 页身份：左对齐，与操作同行，不再套用居中页头 -->
+    <header class="dash-head">
+      <div class="dash-head-main">
+        <span class="dash-eyebrow">总览 · {{ year }} 年 {{ month }} 月</span>
+        <h1 class="dash-title">现金流仪表盘</h1>
+        <p class="dash-desc">按当前档案逐日推演本月现金流，把真实余额与预测口径分开呈现。
+          推演月份：{{ year }} 年 {{ month }} 月 · 发薪日：每月 {{ cf.effPayDay }} 日（当天到账，遇周末照发） · 固定双休</p>
+      </div>
+      <div class="dash-head-actions">
+        <span class="dash-cache muted">档案更新于 {{ cacheTime }}（本地缓存 12 小时）</span>
+        <span v-if="refreshing" class="refresh-dot is-spinning" aria-hidden="true" />
         <n-button size="tiny" quaternary :loading="refreshing" @click="forceRefresh">强制刷新</n-button>
-      </template>
-    </PageHeader>
-
-    <div class="cache-bar">
-      <span class="muted">档案更新于 {{ cacheTime }}（本地缓存 12 小时）</span>
-      <span v-if="refreshing" class="refresh-dot is-spinning" aria-hidden="true" />
-    </div>
+      </div>
+    </header>
 
     <n-alert v-if="!app.salaryConfig" type="warning" :bordered="false" class="empty-alert stagger-in">
       还没有薪资档案，下方数字仅为占位推演。请先到「档案配置」填写税前月薪与社保基数。
@@ -41,11 +38,10 @@
       <div class="muted">到期前 3 天、1 天与当天在此提醒；还完请到「档案配置 → 还款日历」标记已还。</div>
     </n-alert>
 
-    <!-- 首屏：「现在还剩多少」。真实余额由用户维护，与推演值严格分开摆放 -->
-    <div class="pt-section-label">资金总览 · 现在还剩多少</div>
-    <SectionCard accent class="hero">
+    <!-- 首屏横幅：「现在还剩多少」。真实余额由用户维护，与推演值严格分开摆放 -->
+    <section class="dash-hero">
       <div class="hero-main">
-        <Mascot :level="balanceLevel" :size="88" />
+        <Mascot :level="balanceLevel" :size="92" />
         <div class="hero-text">
           <div class="hero-kicker">
             现在还剩
@@ -67,18 +63,13 @@
           <div class="hero-line">{{ heroLine }}</div>
           <div v-if="currentBalance.updatedAt" class="hero-updated muted">上次更新 {{ currentBalance.updatedAt }}</div>
         </div>
-        <div class="hero-actions">
-          <n-button v-if="!editingBalance" size="small" type="primary" @click="startEditBalance">更新余额</n-button>
-          <n-button size="small" tertiary :disabled="currentBalance.value == null" @click="syncToStart">设为推演期初</n-button>
-        </div>
       </div>
-      <div class="hero-compare">
-        <div class="hc-note">
-          下面的「月末预计 / 月内最低」是<b>推演值</b>，不是你手里的钱。<br />
-          想让预测贴近现实，点一下「设为推演期初」。
-        </div>
+      <div class="hero-side">
+        <n-button v-if="!editingBalance" size="small" type="primary" @click="startEditBalance">更新余额</n-button>
+        <n-button size="small" tertiary :disabled="currentBalance.value == null" @click="syncToStart">设为推演期初</n-button>
+        <p class="hero-hint muted">下面的「月末预计 / 月内最低」是<b>推演值</b>，不是你手里的钱。<br />想让预测贴近现实，点一下「设为推演期初」。</p>
       </div>
-    </SectionCard>
+    </section>
 
     <!-- 余额变动台账：每一次金额变化都留痕，可逐条核对 -->
     <SectionCard class="log-card" title="余额变动记录" icon="listCheck">
@@ -116,8 +107,7 @@
     </SectionCard>
 
     <!-- 核心指标：一眼可见的最重要的四个数 -->
-    <div class="pt-section-label">本月推演 · 逐日现金流</div>
-    <div class="pt-stats">
+    <div class="dash-stats">
       <StatCard label="月到手（当前）" tone="primary">
         <span class="text-primary">{{ formatMoney(netNow.net) }}</span>
       </StatCard>
@@ -132,8 +122,8 @@
       </StatCard>
     </div>
 
-    <div class="pt-grid-side">
-      <!-- 核心：现金走势 -->
+    <!-- 主图表 + 侧栏：非对称两栏，图表占主，侧栏放口径与起点 -->
+    <div class="dash-split">
       <SectionCard class="chart-card" title="现金余额走势（逐日 · 多薪资情景）" icon="chart">
         <CashflowTimeline
           :dates="cf.dates"
@@ -185,7 +175,6 @@
     </div>
 
     <!-- 次要内容统一折叠收纳 -->
-    <div class="pt-section-label">风险提示 · 情景试算 · 前瞻</div>
     <n-collapse :default-expanded-names="['risk']" class="dash-collapse">
       <n-collapse-item title="风险提示" name="risk">
         <template #header-extra>
@@ -558,36 +547,51 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 页头补充信息（PageHeader #sub） */
-.dash-sub { font-size: var(--fs-caption); color: var(--c-text-3); margin: 6px 0 0; line-height: 1.7; }
-
-/* 缓存条 / 刷新指示 */
-.cache-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
-.cache-bar .muted { font-size: 12px; }
+/* 页身份：左对齐，与操作同行 —— 与旧版居中页头刻意不同 */
+.dash-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 18px; }
+.dash-head-main { min-width: 0; }
+.dash-eyebrow {
+  display: inline-block;
+  font-size: var(--fs-micro); font-weight: 800; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--c-primary);
+  background: var(--c-primary-soft); border-radius: var(--r-pill);
+  padding: 3px 10px; margin-bottom: 8px;
+}
+.dash-title { font-size: 28px; font-weight: 750; line-height: 1.2; letter-spacing: -.02em; margin: 0; color: var(--c-text); }
+.dash-desc { font-size: 13px; color: var(--c-text-2); margin: 7px 0 0; max-width: 860px; line-height: 1.7; }
+.dash-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; white-space: nowrap; }
+.dash-cache { font-size: 12px; }
 .refresh-dot {
   width: 9px; height: 9px; flex-shrink: 0;
   border-radius: 50%;
   border: 2px solid var(--c-primary-soft-2);
   border-top-color: var(--c-primary);
 }
-.empty-alert { margin: 14px 0; }
-.repay-alert { margin: 14px 0; }
+.empty-alert { margin: 0 0 14px; }
+.repay-alert { margin: 0 0 14px; }
 .remind-row { font-size: 13px; line-height: 1.9; }
 
-/* 首屏 Hero：accent 渐变由全局 .pt-card--accent 提供，这里只管版式 */
-.hero { margin: 0 0 16px; padding: 18px 20px; border-radius: var(--radius-lg); overflow: hidden; }
-.hero-main { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
-.hero-text { flex: 1; min-width: 220px; }
+/* 首屏横幅：全宽 accent 带，左对齐；与旧版居中 hero 卡形成差异 */
+.dash-hero {
+  display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  background: linear-gradient(120deg, var(--c-primary-soft) 0%, var(--c-surface) 58%);
+  border: 1px solid var(--c-primary-soft-2);
+  border-radius: var(--radius-lg);
+  padding: 22px 26px; margin: 0 0 16px;
+  overflow: hidden;
+}
+[data-theme='dark'] .dash-hero { background: linear-gradient(120deg, var(--c-primary-soft) 0%, var(--c-surface) 70%); }
+.hero-main { display: flex; align-items: center; gap: 18px; flex: 1; min-width: 280px; }
+.hero-text { min-width: 200px; }
 .hero-kicker { font-size: 13px; color: var(--c-text-2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.hero-amount { font-size: 40px; font-weight: 700; line-height: 1.25; font-variant-numeric: tabular-nums; letter-spacing: -.5px; }
+.hero-amount { font-size: 42px; font-weight: 750; line-height: 1.2; font-variant-numeric: tabular-nums; letter-spacing: -.5px; margin-top: 2px; }
 .hero-unit { font-size: 15px; font-weight: 500; color: var(--c-text-3); margin-left: 6px; }
 .hero-empty { font-size: 26px; font-weight: 600; color: var(--c-text-3); }
 .hero-edit { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
-.hero-line { font-size: 13px; color: var(--c-text-2); margin-top: 2px; }
+.hero-line { font-size: 13px; color: var(--c-text-2); margin-top: 4px; }
 .hero-updated { font-size: 11px; margin-top: 4px; }
-.hero-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
-.hero-compare { display: flex; gap: 26px; flex-wrap: wrap; align-items: center; margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--c-border); }
-.hc-note { font-size: 12px; color: var(--c-text-3); line-height: 1.7; }
+.hero-side { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; flex-shrink: 0; }
+.hero-hint { font-size: 12px; color: var(--c-text-3); line-height: 1.7; margin: 2px 0 0; max-width: 240px; }
 
 /* 余额变动台账 */
 .log-card { padding: 14px 18px; }
@@ -613,7 +617,15 @@ onBeforeUnmount(() => {
 .log-reason { color: var(--c-text-2); flex: 1; min-width: 160px; }
 .log-foot { font-size: 11px; line-height: 1.7; margin-top: 10px; }
 
-/* 推演起点 / 口径 / 走势：夹在全局 grid 里，去掉卡片自带下边距 */
+/* 核心指标条：横贯整行，不再 auto-fit 叠成方块 */
+.dash-stats {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px; margin: 0 0 16px;
+}
+.dash-stats .pt-stat { margin-bottom: 0; }
+
+/* 主图表 + 侧栏：非对称两栏（图表 1.9fr / 侧栏 1fr） */
+.dash-split { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .chart-card, .core-config, .caliber-card { margin-bottom: 0; }
 .core-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .core-hint { font-size: 12px; line-height: 1.6; }
@@ -662,7 +674,7 @@ onBeforeUnmount(() => {
   background: var(--c-surface-2);
 }
 .dash-fc { padding: 12px; }
-.dash-risk.lv-red, .dash-fc.lv-red { border-left-color: var(--c-danger); }
+.dash-risk.lv-red, .dash-fc.lv-red { border-left-color: var(--c-danger); background: var(--c-danger-soft); }
 .dash-risk.lv-orange, .dash-fc.lv-orange { border-left-color: var(--c-warning); }
 .dash-risk.lv-yellow, .dash-fc.lv-yellow { border-left-color: var(--c-warning-text); }
 .dash-risk.lv-info, .dash-fc.lv-info { border-left-color: var(--c-success); }
@@ -679,15 +691,23 @@ onBeforeUnmount(() => {
 .fc-note { margin-top: 6px; font-size: 11px; color: var(--c-danger); }
 .tip { font-size: 12px; margin-top: 14px; line-height: 1.7; }
 
+@media (max-width: 1100px) {
+  .dash-split { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 900px) {
   .forecast-list { grid-template-columns: repeat(2, 1fr); }
+  .dash-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
+  .dash-head { margin-bottom: 14px; }
+  .dash-title { font-size: 22px; }
+  .dash-hero { padding: 16px; gap: 14px; }
+  .hero { padding: 14px; }
+  .hero-amount { font-size: 34px; }
+  .hero-side { flex-direction: row; flex-wrap: wrap; }
+  .hero-hint { display: none; }
   .log-card { padding: 12px; }
   .log-toggle { margin-left: 0; }
-  .hero { padding: 14px; }
-  .hero-amount { font-size: 32px; }
-  .hero-actions { flex-direction: row; }
   .config-row { gap: 14px; }
   .risk-date { margin-left: 0; }
   .forecast-list { grid-template-columns: 1fr; }

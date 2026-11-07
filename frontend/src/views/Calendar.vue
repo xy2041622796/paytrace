@@ -1,28 +1,13 @@
 <template>
-  <div class="cal pt-page">
-    <PageHeader eyebrow="概览" title="现金流日历" desc="这里算的是「每天结束时预计还剩多少钱」，不是你当天刷了多少钱。点任意一天，看这天到底会进账、扣掉哪几笔。" />
-
-    <!-- 读法说明：把界面上三类数字一次讲清楚，避免把「余额」误读成「花费」 -->
-    <div class="pt-section-label">读法说明</div>
-    <div class="read-hint pt-grid-3">
-      <div class="rh-item"><b>格子里的数</b><span>当天结束时的预计余额</span></div>
-      <div class="rh-item"><b>下面的 + / −</b><span>这天净变化（到账 − 扣款）</span></div>
-      <div class="rh-item"><b>点某一天</b><span>逐笔列出「哪一笔、多少钱」</span></div>
-    </div>
-
-    <div class="cal-note muted">
-      <span>{{ spreadHint }}</span>
-      <span v-if="monthProjection.rolled">
-        本月期初 {{ formatMoney(monthProjection.startBalance) }}，由当前月逐月滚动得出，与仪表盘前瞻一致
-      </span>
-      <span v-else class="note-warn">{{ isCurrentMonth ? '本月按档案推演，未接入实际流水，不作为真实结余' : '历史月份未接入实际流水，此处仅按档案推演，不作为真实结余' }}</span>
-      <span v-if="calendarIncomplete" class="note-warn">该年节假日数据尚未补全，日历属性按双休兜底</span>
-    </div>
-
+  <div class="cal pt-page pt-bleed">
     <div v-if="loading" class="muted">正在加载档案…</div>
-    <div v-else class="cal-body">
-      <!-- 月份切换 + 本月心情 -->
-      <div class="cal-head pt-row pt-row--between">
+    <template v-else>
+      <!-- 顶栏：左身份 + 中月份切换 + 右本月心情，与仪表盘的页身份刻意区分 -->
+      <header class="cal-head-bar">
+        <div class="cal-id">
+          <span class="cal-eyebrow">概览 · 日历</span>
+          <h1 class="cal-title-h">现金流日历</h1>
+        </div>
         <div class="cal-nav">
           <n-button size="small" quaternary @click="prevMonth">‹ 上月</n-button>
           <b class="cal-title">{{ viewYear }} 年 {{ viewMonth }} 月</b>
@@ -34,103 +19,128 @@
           <span>本月{{ mood.text }}</span>
           <span class="mood-sub">月末预计 {{ formatMoney(cf.monthEnd) }}</span>
         </div>
+      </header>
+
+      <p class="cal-sub muted">这里算的是「每天结束时预计还剩多少钱」，不是你当天刷了多少钱。点任意一天，看这天到底会进账、扣掉哪几笔。</p>
+
+      <!-- 读法说明：三条并排的 slim strip，不再用小标题 + 三卡 -->
+      <div class="cal-readhint">
+        <div class="rh-item"><b>格子里的数</b><span>当天结束时的预计余额</span></div>
+        <div class="rh-item"><b>下面的 + / −</b><span>这天净变化（到账 − 扣款）</span></div>
+        <div class="rh-item"><b>点某一天</b><span>逐笔列出「哪一笔、多少钱」</span></div>
       </div>
 
-      <!-- 星期表头（周一为起始，索引与 firstDow 的「周一为 0」严格对齐） -->
-      <div class="cal-grid cal-week">
-        <div v-for="(w, i) in weekLabels" :key="i" class="cal-cell cal-weekname">{{ w }}</div>
+      <div class="cal-note muted">
+        <span>{{ spreadHint }}</span>
+        <span v-if="monthProjection.rolled">
+          本月期初 {{ formatMoney(monthProjection.startBalance) }}，由当前月逐月滚动得出，与仪表盘前瞻一致
+        </span>
+        <span v-else class="note-warn">{{ isCurrentMonth ? '本月按档案推演，未接入实际流水，不作为真实结余' : '历史月份未接入实际流水，此处仅按档案推演，不作为真实结余' }}</span>
+        <span v-if="calendarIncomplete" class="note-warn">该年节假日数据尚未补全，日历属性按双休兜底</span>
       </div>
 
-      <!-- 日期格子 -->
-      <div class="cal-grid">
-        <div
-          v-for="(cell, i) in cells"
-          :key="i"
-          class="cal-cell"
-          :class="cellClass(cell)"
-          :style="{ '--i': i }"
-          @click="cell && selectDay(cell.day)"
-        >
-          <template v-if="cell">
-            <div class="cal-daynum">
-              {{ cell.day }}
-              <span
-                v-if="cell.dayType !== 'workday'"
-                class="daytype"
-                :class="'dt-' + cell.dayType"
-                :title="dayTypeTitle[cell.dayType]"
-              >{{ dayTypeLabel[cell.dayType] }}</span>
-              <span v-if="cell.day === todayDay && isCurrentMonth" class="today-pill">今</span>
-            </div>
-            <div class="cal-balance-row">
-              <span class="cal-balance-label">余额</span>
-              <b class="cal-balance">{{ formatMoney(cell.balance, false) }}</b>
-            </div>
-            <div class="cal-delta" :class="cell.delta > 0 ? 'd-up' : 'd-down'">
-              {{ cell.delta > 0 ? '+' : '' }}{{ formatMoney(cell.delta, false) }}
-              <span class="delta-word">今日</span>
-            </div>
-            <div class="cal-marks">
-              <span v-if="cell.isPay" class="mark mark-pay" title="发薪到账">薪</span>
-              <span v-if="cell.isRepay" class="mark mark-rep" title="还款扣款">还</span>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- 当日明细：先用一条等式讲清「每天为什么变」，再逐笔列出到底是哪几笔 -->
-      <SectionCard class="day-detail" title="当日明细" icon="listCheck">
-        <div class="dd-head">
-          <div>
-            <b>{{ selectedLabel }}</b>
-            <div class="dd-sub muted">{{ dayHeadline }}</div>
+      <!-- 通栏布局：左为整月网格（突破 1240 收敛），右为常驻当日明细 -->
+      <div class="cal-layout">
+        <div class="cal-grid-wrap">
+          <!-- 星期表头（周一为起始，索引与 firstDow 的「周一为 0」严格对齐） -->
+          <div class="cal-grid cal-week">
+            <div v-for="(w, i) in weekLabels" :key="i" class="cal-cell cal-weekname">{{ w }}</div>
           </div>
-          <span class="muted dd-bal">{{ dayBalanceText }}</span>
-        </div>
 
-        <div class="dd-equation">
-          <div class="eq-row"><span>上一天结束时</span><b>{{ formatMoney(prevBalance) }}</b></div>
-          <div class="eq-row eq-in"><span>这天到账</span><b>+ {{ formatMoney(dayIncome) }}</b></div>
-          <div class="eq-row eq-out"><span>这天扣掉</span><b>− {{ formatMoney(dayOutflow) }}</b></div>
-          <div class="eq-row eq-total">
-            <span>＝ 这天结束时</span>
-            <b :class="dayBalance < 0 ? 'text-danger' : 'text-success'">{{ formatMoney(dayBalance) }}</b>
+          <!-- 日期格子 -->
+          <div class="cal-grid">
+            <div
+              v-for="(cell, i) in cells"
+              :key="i"
+              class="cal-cell"
+              :class="cellClass(cell)"
+              :style="{ '--i': i }"
+              @click="cell && selectDay(cell.day)"
+            >
+              <template v-if="cell">
+                <div class="cal-daynum">
+                  {{ cell.day }}
+                  <span
+                    v-if="cell.dayType !== 'workday'"
+                    class="daytype"
+                    :class="'dt-' + cell.dayType"
+                    :title="dayTypeTitle[cell.dayType]"
+                  >{{ dayTypeLabel[cell.dayType] }}</span>
+                  <span v-if="cell.day === todayDay && isCurrentMonth" class="today-pill">今</span>
+                </div>
+                <div class="cal-balance-row">
+                  <span class="cal-balance-label">余额</span>
+                  <b class="cal-balance">{{ formatMoney(cell.balance, false) }}</b>
+                </div>
+                <div class="cal-delta" :class="cell.delta > 0 ? 'd-up' : 'd-down'">
+                  {{ cell.delta > 0 ? '+' : '' }}{{ formatMoney(cell.delta, false) }}
+                  <span class="delta-word">今日</span>
+                </div>
+                <div class="cal-marks">
+                  <span v-if="cell.isPay" class="mark mark-pay" title="发薪到账">薪</span>
+                  <span v-if="cell.isRepay" class="mark mark-rep" title="还款扣款">还</span>
+                </div>
+              </template>
+            </div>
           </div>
-        </div>
 
-        <div class="dd-section-title">具体是哪几笔</div>
-        <div v-if="selectedItems.length" class="dd-list">
-          <div
-            v-for="(it, i) in selectedItems"
-            :key="i"
-            class="dd-item stagger-in"
-            :class="'ev-' + it.type"
-            :style="{ '--i': i }"
-          >
-            <span class="dd-tag">{{ it.tag }}</span>
-            <span class="dd-name">
-              {{ it.name }}
-              <small v-if="it.note" class="dd-note">{{ it.note }}</small>
-            </span>
-            <b class="dd-amt" :class="it.amount >= 0 ? 'text-success' : 'text-danger'">
-              {{ it.amount >= 0 ? '+' : '' }}{{ formatMoney(it.amount) }}
-            </b>
+          <div class="pt-legend">
+            <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--success" /> 发薪到账（余额增加）</span>
+            <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--danger" /> 还款扣款（余额减少）</span>
+            <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--success" /> 余额充足</span>
+            <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--warning" /> 偏紧</span>
+            <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--danger" /> 转负</span>
           </div>
         </div>
-        <EmptyState v-else text="这天按档案推演没有固定收支：没到发薪 / 还款日，日常零花也没记账。" icon="inbox" />
-        <div class="dd-foot muted">
-          以上是按档案推演的预计金额，不是真实流水；标「均摊」的是月固定开支平摊到今天的份额，不是当天真实刷卡。
-        </div>
-      </SectionCard>
 
-      <div class="pt-legend">
-        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--success" /> 发薪到账（余额增加）</span>
-        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--danger" /> 还款扣款（余额减少）</span>
-        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--success" /> 余额充足</span>
-        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--warning" /> 偏紧</span>
-        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--danger" /> 转负</span>
+        <!-- 当日明细：常驻右侧栏（宽屏 sticky），先用等式讲清「每天为什么变」 -->
+        <aside class="cal-detail">
+          <SectionCard class="day-detail" title="当日明细" icon="listCheck">
+            <div class="dd-head">
+              <div>
+                <b>{{ selectedLabel }}</b>
+                <div class="dd-sub muted">{{ dayHeadline }}</div>
+              </div>
+              <span class="muted dd-bal">{{ dayBalanceText }}</span>
+            </div>
+
+            <div class="dd-equation">
+              <div class="eq-row"><span>上一天结束时</span><b>{{ formatMoney(prevBalance) }}</b></div>
+              <div class="eq-row eq-in"><span>这天到账</span><b>+ {{ formatMoney(dayIncome) }}</b></div>
+              <div class="eq-row eq-out"><span>这天扣掉</span><b>− {{ formatMoney(dayOutflow) }}</b></div>
+              <div class="eq-row eq-total">
+                <span>＝ 这天结束时</span>
+                <b :class="dayBalance < 0 ? 'text-danger' : 'text-success'">{{ formatMoney(dayBalance) }}</b>
+              </div>
+            </div>
+
+            <div class="dd-section-title">具体是哪几笔</div>
+            <div v-if="selectedItems.length" class="dd-list">
+              <div
+                v-for="(it, i) in selectedItems"
+                :key="i"
+                class="dd-item stagger-in"
+                :class="'ev-' + it.type"
+                :style="{ '--i': i }"
+              >
+                <span class="dd-tag">{{ it.tag }}</span>
+                <span class="dd-name">
+                  {{ it.name }}
+                  <small v-if="it.note" class="dd-note">{{ it.note }}</small>
+                </span>
+                <b class="dd-amt" :class="it.amount >= 0 ? 'text-success' : 'text-danger'">
+                  {{ it.amount >= 0 ? '+' : '' }}{{ formatMoney(it.amount) }}
+                </b>
+              </div>
+            </div>
+            <EmptyState v-else text="这天按档案推演没有固定收支：没到发薪 / 还款日，日常零花也没记账。" icon="inbox" />
+            <div class="dd-foot muted">
+              以上是按档案推演的预计金额，不是真实流水；标「均摊」的是月固定开支平摊到今天的份额，不是当天真实刷卡。
+            </div>
+          </SectionCard>
+        </aside>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -353,11 +363,34 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 读法说明：三卡分组 */
-.read-hint { margin: 0 0 12px; }
+/* 整月网格突破 1240 收敛：抵消内容区内边距，做到接近通栏 */
+.cal.pt-bleed { margin-left: -36px; margin-right: -36px; padding-left: 36px; padding-right: 36px; }
+
+/* 顶栏：左身份 + 中月份切换 + 右心情 */
+.cal-head-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.cal-id { display: flex; flex-direction: column; gap: 4px; margin-right: auto; }
+.cal-eyebrow {
+  font-size: var(--fs-micro); font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--c-primary); background: var(--c-primary-soft); border-radius: var(--r-pill);
+  padding: 3px 10px; align-self: flex-start;
+}
+.cal-title-h { font-size: 26px; font-weight: 750; line-height: 1.2; letter-spacing: -.02em; margin: 0; color: var(--c-text); }
+.cal-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cal-title { font-size: 16px; }
+.cal-mood { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; padding: 4px 12px 4px 4px; border-radius: var(--r-pill); flex-wrap: wrap; }
+.mood-sub { font-size: 12px; font-weight: 400; color: var(--c-text-3); }
+.m-ok { color: var(--c-success); background: var(--c-success-soft); }
+.m-mid { color: var(--c-primary); background: var(--c-primary-soft); }
+.m-low { color: var(--c-warning-text); background: var(--c-warning-soft); }
+.m-neg { color: var(--c-danger); background: var(--c-danger-soft); }
+
+.cal-sub { font-size: 13px; color: var(--c-text-2); margin: 0 0 12px; max-width: 900px; line-height: 1.7; }
+
+/* 读法说明：三条并排 slim strip */
+.cal-readhint { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 10px; }
 .rh-item {
   display: flex; flex-direction: column; gap: 3px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border: 1px solid var(--c-border);
   border-radius: var(--radius-sm);
   background: var(--c-surface-2);
@@ -369,16 +402,9 @@ onUnmounted(() => {
 .cal-note { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; padding: 8px 10px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-2); margin-top: 10px; line-height: 1.7; }
 .note-warn { color: var(--c-warning-text); }
 
-/* 月份切换 + 心情 */
-.cal-head { margin: 14px 0; }
-.cal-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.cal-title { font-size: 16px; }
-.cal-mood { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; padding: 4px 12px 4px 4px; border-radius: var(--r-pill); flex-wrap: wrap; }
-.mood-sub { font-size: 12px; font-weight: 400; color: var(--c-text-3); }
-.m-ok { color: var(--c-success); background: var(--c-success-soft); }
-.m-mid { color: var(--c-primary); background: var(--c-primary-soft); }
-.m-low { color: var(--c-warning-text); background: var(--c-warning-soft); }
-.m-neg { color: var(--c-danger); background: var(--c-danger-soft); }
+/* 通栏布局：左网格 + 右 sticky 明细 */
+.cal-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; margin-top: 14px; }
+.cal-grid-wrap { min-width: 0; }
 
 /* 日历网格 */
 .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
@@ -441,7 +467,8 @@ onUnmounted(() => {
 .is-selected { border-color: var(--c-primary); box-shadow: 0 0 0 2px var(--c-primary-soft); }
 
 /* 当日明细：等式卡 + 逐笔清单（交错入场交给全局 .stagger-in + --i） */
-.day-detail { margin-top: 16px; }
+.cal-detail { position: sticky; top: 16px; }
+.day-detail { margin-top: 0; }
 .dd-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .dd-sub { font-size: 12px; line-height: 1.6; margin-top: 3px; }
 .dd-bal { font-size: 12px; white-space: nowrap; }
@@ -466,7 +493,15 @@ onUnmounted(() => {
 .dd-amt { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dd-foot { font-size: 11px; line-height: 1.7; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--c-border); }
 
+@media (max-width: 1080px) {
+  .cal-layout { grid-template-columns: minmax(0, 1fr); }
+  .cal-detail { position: static; }
+}
 @media (max-width: 768px) {
+  .cal.pt-bleed { margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+  .cal-head-bar { gap: 10px; }
+  .cal-title-h { font-size: 21px; }
+  .cal-readhint { grid-template-columns: 1fr; gap: 8px; }
   .cal-grid { gap: 5px; grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .cal-cell, .cal-blank, .cal-cell:empty { min-height: 74px; }
   .cal-day { padding: 5px 6px; }

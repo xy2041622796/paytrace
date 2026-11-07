@@ -1,31 +1,56 @@
 <template>
-  <div class="todo">
-    <PageHeader
-      eyebrow="管理"
-      title="待办事项"
-      desc="记录还款提醒、补贴申报、账单到期等事项，关联日期后会自动按紧急程度置顶。"
-    />
+  <div class="todo pt-page">
+    <!-- 页身份：左对齐，不再套用居中页头 -->
+    <header class="todo-head">
+      <span class="todo-eyebrow">规划</span>
+      <h1 class="todo-title-x">待办事项</h1>
+      <p class="todo-desc">记录还款提醒、补贴申报、账单到期等事项，关联日期后会自动按紧急程度置顶。</p>
+    </header>
 
-    <n-alert v-if="overdueCount || soonCount" type="warning" :bordered="false" class="todo-alert">
-      有 {{ overdueCount }} 项已逾期、{{ soonCount }} 项 3 天内到期，已排在最前面。
-    </n-alert>
+    <!-- 分诊摘要：逾期 / 3 天内 / 其他，一眼看清最该先处理什么 -->
+    <div class="tri-band">
+      <div class="tri-cell t-urgent"><b>{{ overdueCount }}</b><span>已逾期</span></div>
+      <div class="tri-cell t-soon"><b>{{ soonCount }}</b><span>3 天内到期</span></div>
+      <div class="tri-cell t-rest"><b>{{ displayTodos.length - overdueCount - soonCount }}</b><span>其他待办</span></div>
+    </div>
 
-    <SectionCard title="待办清单" icon="listCheck">
-      <div class="add">
-        <n-input v-model:value="newTitle" placeholder="待办内容（如 11月25日还白条）" style="width:260px" />
-        <n-date-picker v-model:value="newDate" type="date" clearable placeholder="关联日期（可选）" />
-        <n-button type="primary" @click="add">添加</n-button>
+    <!-- 添加条 -->
+    <div class="todo-add">
+      <n-input v-model:value="newTitle" placeholder="待办内容（如 11月25日还白条）" style="width:260px" />
+      <n-date-picker v-model:value="newDate" type="date" clearable placeholder="关联日期（可选）" />
+      <n-button type="primary" @click="add">添加</n-button>
+    </div>
+
+    <!-- 分诊清单：按紧急度排序，逾期 / 3 天内左侧高亮；联动还款行可点跳转 -->
+    <section class="todo-board">
+      <div
+        v-for="t in displayTodos" :key="t.id"
+        class="todo-row"
+        :class="['p' + priorityOf(t), { done: t.status === 'done', linked: t.linked }]"
+        @click="t.linked ? goCalendar() : null"
+      >
+        <button v-if="!t.linked" type="button" class="todo-chk" :class="{ on: t.status === 'done' }" :aria-label="t.status === 'done' ? '标为待办' : '完成'" @click.stop="toggle(t)">✓</button>
+        <span v-else class="todo-src">还款日历</span>
+
+        <div class="todo-main">
+          <div class="todo-title" :class="{ 'text-danger': t.overdue }">{{ t.title }}</div>
+          <div class="todo-sub">
+            <span v-if="t.related_repay_date">{{ formatDateCN(t.related_repay_date) }}</span>
+            <span v-if="t.amount && t.linked" :class="t.overdue ? 'text-danger' : ''">{{ formatMoney(t.amount) }}</span>
+            <span v-if="t.daysLeft != null" :class="t.daysLeft < 0 ? 'text-danger' : (t.daysLeft <= 3 ? 'text-warning' : 'muted')">{{ t.daysLeft < 0 ? `逾期 ${-t.daysLeft} 天` : (t.daysLeft === 0 ? '今天到期' : t.daysLeft + ' 天') }}</span>
+          </div>
+        </div>
+
+        <span class="todo-badge" :class="priorityOf(t) === 0 ? 'b-urgent' : (priorityOf(t) === 1 ? 'b-soon' : 'b-mute')">{{ PRIORITY_LABEL[priorityOf(t)] }}</span>
+
+        <button v-if="t.linked" type="button" class="todo-go" @click.stop="goCalendar">查看</button>
+        <button v-else type="button" class="todo-del" @click.stop="del(t)">删除</button>
       </div>
 
-      <div class="table-scroll">
-        <n-data-table
-          :columns="cols" :data="displayTodos" :row-props="rowProps"
-          :bordered="false" size="small" :scroll-x="940"
-        />
-      </div>
-      <EmptyState v-if="!displayTodos.length" text="暂无待办事项，添加一条开始规划吧。" icon="inbox" />
-      <p class="pt-note linked-note">带「还款日历」标签的待办由还款账单自动生成，仅本地计算、不写入待办清单；点按可跳转还款日历。</p>
-    </SectionCard>
+      <EmptyState v-if="!displayTodos.length" text="暂无待办事项，添加一条开始规划吧。" icon="inbox" class="todo-empty" />
+    </section>
+
+    <p class="pt-note todo-note">带「还款日历」标签的待办由还款账单自动生成，仅本地计算、不写入待办清单；点按可跳转还款日历。</p>
   </div>
 </template>
 
@@ -233,23 +258,78 @@ onMounted(load)
 /* 全局骨架 / 卡片 / 表格 / 空状态 / 语义文字由 theme.css 统一提供，本页只保留特有结构 */
 .todo { min-width: 0; }
 
-.todo-alert { margin: 0 0 var(--sp-4); border-radius: var(--radius-sm); }
+/* 页身份 */
+.todo-head { max-width: 720px; margin-bottom: 18px; }
+.todo-eyebrow { display: inline-block; font-size: var(--fs-caption); letter-spacing: .14em; color: var(--c-primary); margin-bottom: 6px; }
+.todo-title-x { font-size: var(--fs-display); font-weight: 700; line-height: 1.08; margin: 0; color: var(--c-text); }
+.todo-desc { margin: 8px 0 0; font-size: var(--fs-body); color: var(--c-text-2); line-height: 1.6; }
 
-.add {
-  display: flex; gap: var(--sp-2); margin: 0 0 var(--sp-4);
-  align-items: center; flex-wrap: wrap;
+/* 分诊摘要带：逾期 / 3 天内 / 其他 */
+.tri-band { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
+.tri-cell {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 14px 16px; border-radius: 12px;
+  background: var(--c-surface); border: 1px solid var(--c-border);
+}
+.tri-cell b { font-size: var(--fs-display); font-weight: 700; line-height: 1; }
+.tri-cell span { font-size: var(--fs-caption); color: var(--c-text-2); }
+.tri-cell.t-urgent { border-color: var(--c-danger-soft); }
+.tri-cell.t-urgent b { color: var(--c-danger); }
+.tri-cell.t-soon { border-color: var(--c-warning-soft); }
+.tri-cell.t-soon b { color: var(--c-warning); }
+
+/* 添加条：作为唯一强调区（accent 表面） */
+.todo-add {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 12px 16px; margin-bottom: 18px;
+  background: var(--c-primary-soft); border: 1px solid var(--c-primary-soft-2); border-radius: 12px;
 }
 
-/* 列渲染器 h() 生成的标题与「还款日历」来源标 */
-.cell-title { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
-.src-tag {
-  font-size: var(--fs-micro); padding: 1px 6px; border-radius: var(--r-xs); flex-shrink: 0;
+/* 分诊清单：按紧急度排序，逾期 / 3 天内左侧高亮 */
+.todo-board { display: flex; flex-direction: column; gap: 8px; }
+.todo-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; background: var(--c-surface);
+  border: 1px solid var(--c-border); border-left: 3px solid var(--c-border);
+  border-radius: 10px;
+}
+.todo-row.p0 { border-left-color: var(--c-danger); }
+.todo-row.p1 { border-left-color: var(--c-warning); }
+.todo-row.done { opacity: .6; }
+.todo-row.linked { cursor: pointer; }
+.todo-row.linked:hover { border-color: var(--c-primary); }
+
+.todo-chk {
+  width: 22px; height: 22px; flex: 0 0 auto; border-radius: 6px;
+  border: 1.5px solid var(--c-border-strong); background: var(--c-surface);
+  color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; line-height: 1; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.todo-chk.on { background: var(--c-primary); border-color: var(--c-primary); }
+.todo-src {
+  font-size: var(--fs-micro); padding: 2px 6px; border-radius: var(--r-xs); flex: 0 0 auto;
   background: var(--c-hover); color: var(--c-text-2);
 }
-
-.linked-note { margin: var(--sp-4) 0 0; }
+.todo-main { flex: 1 1 auto; min-width: 0; }
+.todo-title { font-size: var(--fs-body); font-weight: 600; color: var(--c-text); word-break: break-word; }
+.todo-row.done .todo-title { text-decoration: line-through; }
+.todo-sub { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; font-size: var(--fs-caption); color: var(--c-text-2); }
+.todo-badge { font-size: var(--fs-micro); padding: 2px 8px; border-radius: 999px; flex: 0 0 auto; }
+.todo-badge.b-urgent { color: var(--c-danger); background: var(--c-danger-soft); }
+.todo-badge.b-soon { color: var(--c-warning); background: var(--c-warning-soft); }
+.todo-badge.b-mute { color: var(--c-text-2); background: var(--c-hover); }
+.todo-go, .todo-del {
+  flex: 0 0 auto; font-size: var(--fs-caption); border: 0; background: transparent;
+  cursor: pointer; color: var(--c-text-2); padding: 4px 8px; border-radius: 6px;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.todo-go:hover, .todo-del:hover { background: var(--c-hover); }
+.todo-del:hover { color: var(--c-danger); }
+.todo-empty { padding: 30px; }
+.todo-note { margin: 16px 0 0; }
 
 @media (max-width: 768px) {
-  .add > * { flex: 1 1 100%; min-width: 0; }
+  .tri-band { grid-template-columns: 1fr; gap: 10px; }
+  .todo-add > * { flex: 1 1 100%; min-width: 0; }
 }
 </style>

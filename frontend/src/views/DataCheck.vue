@@ -1,16 +1,18 @@
 <template>
   <div class="check pt-page">
-    <PageHeader
-      eyebrow="工具"
-      title="数据体检"
-      desc="主动扫描档案、开支、还款与流水的合法性，把脏数据挡在推演之前。检查只读，不会修改任何数据。"
-    >
-      <template #actions>
+    <!-- 页身份：左对齐报告头，操作置于右侧，不再套用居中页头 -->
+    <header class="dc-head">
+      <div class="dc-head-main">
+        <span class="dc-eyebrow">工具</span>
+        <h1 class="dc-title">数据体检</h1>
+        <p class="dc-desc">主动扫描档案、开支、还款与流水的合法性，把脏数据挡在推演之前。检查只读，不会修改任何数据。</p>
+      </div>
+      <div class="dc-actions">
         <n-button type="primary" :loading="checking" @click="runCheck">重新检查</n-button>
         <n-button :loading="exporting" :disabled="exporting" @click="exportBackup">导出全量备份</n-button>
         <n-button :disabled="!!presetPlan" @click="preparePreset">按基准数据预填</n-button>
-      </template>
-    </PageHeader>
+      </div>
+    </header>
 
     <!-- 常驻错误条：加载 / 检查失败时明确显示，不只是一闪而过的提示 -->
     <div v-if="loadError" class="load-error card dc-alert" role="alert">
@@ -35,11 +37,23 @@
     </div>
     <p class="muted intro">备份是只读的 JSON 快照，刻意不提供导入功能，避免误覆盖现有数据。</p>
 
-    <div class="summary">
-      <StatCard label="严重问题" tone="danger" value-class="text-danger">{{ errorCount }}</StatCard>
-      <StatCard label="需要留意" tone="warning" value-class="text-warning">{{ warnCount }}</StatCard>
-      <StatCard label="提示" tone="success" value-class="text-success">{{ infoCount }}</StatCard>
-    </div>
+    <!-- 审计评分条：严重 / 留意 / 提示 三段比例 + 三数 -->
+    <section class="dc-grade">
+      <div class="dc-grade-head">
+        <span class="dc-verdict" :class="errorCount > 0 ? 'v-bad' : (warnCount > 0 ? 'v-warn' : 'v-ok')">{{ errorCount > 0 ? '存在严重问题' : (warnCount > 0 ? '需要留意' : '数据健康') }}</span>
+        <span class="muted">上次检查：{{ formatDateTimeCN(checkedAt) }}</span>
+      </div>
+      <div class="dc-meter">
+        <div class="dc-seg seg-red" :style="{ flex: errorCount || 0 }" />
+        <div class="dc-seg seg-yellow" :style="{ flex: warnCount || 0 }" />
+        <div class="dc-seg seg-green" :style="{ flex: (infoCount || 0) + 1 }" />
+      </div>
+      <div class="dc-counts">
+        <div class="dc-count c-red"><b>{{ errorCount }}</b><span>严重问题</span></div>
+        <div class="dc-count c-yellow"><b>{{ warnCount }}</b><span>需要留意</span></div>
+        <div class="dc-count c-green"><b>{{ infoCount }}</b><span>提示</span></div>
+      </div>
+    </section>
 
     <SectionCard title="扫描结果" desc="按级别列出需要处理的数据问题" icon="shieldCheck">
       <template #actions>
@@ -396,8 +410,46 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 本页特有：错误条换行、日志表格窄屏横向滚动；区块/表格/状态样式全部交给全局 */
+/* ===== 审计报告骨架：左对齐报告头 + 横向评分条 ===== */
 .check { min-width: 0; }
+
+.dc-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.dc-head-main { min-width: 0; }
+.dc-eyebrow { display: inline-block; font-size: var(--fs-caption); letter-spacing: .14em; color: var(--c-primary); margin-bottom: 6px; }
+.dc-title { font-size: var(--fs-display); font-weight: 700; line-height: 1.08; margin: 0; color: var(--c-text); }
+.dc-desc { margin: 8px 0 0; max-width: 60ch; font-size: var(--fs-body); color: var(--c-text-2); line-height: 1.6; }
+.dc-actions { display: flex; gap: 10px; flex-wrap: wrap; flex-shrink: 0; }
+
+/* 评分条：三段比例 + 三数 */
+.dc-grade {
+  padding: 18px 20px; margin-bottom: 18px;
+  background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 14px;
+}
+.dc-grade-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.dc-verdict { font-size: var(--fs-section); font-weight: 700; }
+.v-bad { color: var(--c-danger); }
+.v-warn { color: var(--c-warning); }
+.v-ok { color: var(--c-success); }
+.dc-meter {
+  display: flex; gap: 2px; height: 12px; border-radius: 999px;
+  overflow: hidden; background: var(--c-surface-2);
+}
+.dc-seg { height: 100%; transition: flex var(--dur-base) var(--ease-out); }
+.seg-red { background: var(--c-danger); }
+.seg-yellow { background: var(--c-warning); }
+.seg-green { background: var(--c-success); }
+.dc-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
+.dc-count { display: flex; flex-direction: column; gap: 2px; }
+.dc-count b { font-size: var(--fs-display); font-weight: 700; line-height: 1; }
+.dc-count span { font-size: var(--fs-caption); color: var(--c-text-2); }
+.c-red b { color: var(--c-danger); }
+.c-yellow b { color: var(--c-warning); }
+.c-green b { color: var(--c-success); }
+
+/* 错误条换行、日志表格窄屏横向滚动；区块/表格/状态样式全部交给全局 */
 .dc-alert { flex-wrap: wrap; }
 .dc-table { max-width: 100%; overflow-x: auto; }
 

@@ -87,8 +87,14 @@
   --ease-in-out: cubic-bezier(.4, 0, .2, 1);
 }
 
-/* 宽屏阅读宽度：放在所有 @keyframes 之前，避免单行关键帧被静态检查的提取正则跨界误捕获 */
+/* 宽屏阅读宽度：放在所有 @keyframes 之前，避免单行关键帧被静态检查的提取正则跨界误捕获。
+   1240 仅作默认收敛；宽屏逐步放宽上限，去掉"博客式"对称留白，让内容像应用而非文章。 */
 main.content > * { max-width: 1240px; margin-left: auto; margin-right: auto; }
+@media (min-width: 1480px) { main.content > * { max-width: 1680px; } }
+@media (min-width: 1920px) { main.content > * { max-width: 2040px; } }
+/* 特定页主动突破居中收敛（如整月日历网格）：由页内根节点加 .pt-bleed 触发。
+   特异性 main.content > .pt-bleed (0,2,0) 高于 main.content > * (0,1,1)，可覆盖。 */
+main.content > .pt-bleed { max-width: none; margin-left: 0; margin-right: 0; }
 
 [data-theme='dark'] {
   color-scheme: dark;
