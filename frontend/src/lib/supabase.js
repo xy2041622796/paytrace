@@ -43,7 +43,9 @@ export async function callAgnes(action, payload) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`
     },
-    body: JSON.stringify({ action, ...payload })
+    body: JSON.stringify({ action, ...payload }),
+    // Edge Function 挂起时不能让页面永久转圈
+    signal: AbortSignal.timeout(20000)
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

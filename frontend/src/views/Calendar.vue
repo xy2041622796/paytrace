@@ -35,8 +35,10 @@
         <span v-if="monthProjection.rolled">
           本月期初 {{ formatMoney(monthProjection.startBalance) }}，由当前月逐月滚动得出，与仪表盘前瞻一致
         </span>
-        <span v-else class="note-warn">{{ isCurrentMonth ? '本月按档案推演，未接入实际流水，不作为真实结余' : '历史月份未接入实际流水，此处仅按档案推演，不作为真实结余' }}</span>
+        <span v-else class="note-warn">{{ isCurrentMonth ? '本月按档案推演并叠加已记流水；固定开支 / 还款为预算线，整体仍为推演值，不作为真实结余' : '历史月份按档案与已记流水共同推演，不作为真实结余' }}</span>
         <span v-if="calendarIncomplete" class="note-warn">该年节假日数据尚未补全，日历属性按双休兜底</span>
+        <span v-if="holidayInfo.loaded">节假日按运营表判定（已加载 {{ holidayInfo.size }} 条）</span>
+        <span>发薪 / 还款遇周末或法定节假日照发、不顺延（按账单日当天落点）</span>
       </div>
 
       <!-- 通栏布局：左为整月网格（突破 1240 收敛），右为常驻当日明细 -->
@@ -105,11 +107,11 @@
             </div>
 
             <div class="dd-equation">
-              <div class="eq-row"><span>上一天结束时</span><b>{{ formatMoney(prevBalance) }}</b></div>
-              <div class="eq-row eq-in"><span>这天到账</span><b>+ {{ formatMoney(dayIncome) }}</b></div>
-              <div class="eq-row eq-out"><span>这天扣掉</span><b>− {{ formatMoney(dayOutflow) }}</b></div>
+              <div class="eq-row"><span>前一天余额</span><b>{{ formatMoney(prevBalance) }}</b></div>
+              <div class="eq-row eq-in"><span>当日进账</span><b>+ {{ formatMoney(dayIncome) }}</b></div>
+              <div class="eq-row eq-out"><span>当日支出</span><b>− {{ formatMoney(dayOutflow) }}</b></div>
               <div class="eq-row eq-total">
-                <span>＝ 这天结束时</span>
+                <span>＝ 当日余额</span>
                 <b :class="dayBalance < 0 ? 'text-danger' : 'text-success'">{{ formatMoney(dayBalance) }}</b>
               </div>
             </div>
@@ -145,17 +147,20 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useAppStore } from '../stores/app'
 import { buildMonthProjection } from '../composables/useProjection'
 import { todayISO } from '../lib/date'
 import {
-  readStartBalance, readRecurringRepayment, readExpenseSpreadMode
+  readStartBalance, readRecurringRepayment, readExpenseSpreadMode,
+  readAssumePreTax, readScenarioBonusEnabled, readScenarioBonus, readScenarioBonusDay
 } from '../lib/prefs'
 import { formatMoney } from '../lib/labels'
 import { round2 } from '../lib/validation'
-import { classifyDay } from '../lib/holidays2026'
+import { classifyDay, getHolidayCalendarInfo } from '../lib/holidays2026'
+import { trackEvent } from '../lib/analytics'
+import { subscribeFlowChange } from '../lib/flowChannel'
 import { SAFETY_LINE } from '../lib/constants'
 import Mascot from '../components/Mascot.vue'
 
@@ -185,19 +190,33 @@ const dayTypeTitle = {
 // 避免切月后两页相差数百元。偏好变化（期初余额 / 月供 / 分摊口径）即时重算。
 const prefRevision = ref(0)
 const onPrefChange = () => { prefRevision.value++ }
+const onTxChange = () => { prefRevision.value++ }
+let unsubFlow = null
 const monthProjection = computed(() => {
   void prefRevision.value
+  // 情景参数与仪表盘同源：调薪假设 / 补贴试算一处调整，日历的每日余额同步重算
+  const assumePreTax = readAssumePreTax()
+  const bonus = readScenarioBonusEnabled()
+    ? { amount: readScenarioBonus(), day: readScenarioBonusDay() }
+    : null
   return buildMonthProjection({
     app,
     startBalance: readStartBalance(),
     recurringRepayment: readRecurringRepayment(),
+    assumePreTax,
     baseYear: todayYear,
     baseMonth: todayMonth,
     year: viewYear.value,
-    month: viewMonth.value
+    month: viewMonth.value,
+    actuals: app.transactions,
+    bonus
   })
 })
 const cf = computed(() => monthProjection.value.projection.cf)
+const holidayInfo = computed(() => {
+  void prefRevision.value
+  return getHolidayCalendarInfo()
+})
 const spreadHint = computed(() => {
   void prefRevision.value
   return readExpenseSpreadMode() === 'daily'
@@ -205,6 +224,19 @@ const spreadHint = computed(() => {
     : '月固定开支全部计入各自扣费日当天'
 })
 const calendarIncomplete = computed(() => viewYear.value > 2026)
+
+// 埋点：记录该月命中节假日 / 调休补班的节点（资金日期按用户决策不顺延，rule=keep）
+function reportHoliday() {
+  const types = cf.value?.dayTypes || []
+  const legal = types.filter((t) => t === 'legal').length
+  const makeup = types.filter((t) => t === 'makeup').length
+  if (!legal && !makeup) return
+  trackEvent('holiday_adjusted', {
+    year: viewYear.value, month: viewMonth.value,
+    legal_days: legal, makeup_days: makeup, rule: 'keep'
+  }, `${viewYear.value}-${viewMonth.value}`)
+}
+watch([viewYear, viewMonth], () => reportHoliday())
 
 // 逐日数据与事件按天归类
 const dailyByDay = computed(() => {
@@ -279,9 +311,9 @@ const dayBalanceText = computed(() =>
 const dayHeadline = computed(() => {
   if (!dayIncome.value && !dayOutflow.value) return '这天按档案推演没有固定收支，余额不变。'
   const bits = []
-  if (dayIncome.value) bits.push(`到账 ${formatMoney(dayIncome.value)}`)
-  if (dayOutflow.value) bits.push(`扣掉 ${formatMoney(dayOutflow.value)}`)
-  return `这天${bits.join('，')}，所以余额${dayDelta.value >= 0 ? '增加' : '减少'} ${formatMoney(Math.abs(dayDelta.value))}。`
+  if (dayIncome.value) bits.push(`进账 ${formatMoney(dayIncome.value)}`)
+  if (dayOutflow.value) bits.push(`支出 ${formatMoney(dayOutflow.value)}`)
+  return `当日${bits.join('，')}，所以余额${dayDelta.value >= 0 ? '增加' : '减少'} ${formatMoney(Math.abs(dayDelta.value))}。`
 })
 
 // 逐笔展开：引擎在 events[].items 里给出每笔名称与金额，
@@ -347,18 +379,26 @@ function goToday() {
 
 onMounted(async () => {
   window.addEventListener('paytrace:pref-changed', onPrefChange)
+  window.addEventListener('paytrace:transactions-changed', onTxChange)
   window.addEventListener('storage', onPrefChange)
+  unsubFlow = subscribeFlowChange(() => {
+    app.reloadTransactions({ silent: true }).catch(() => {})
+    prefRevision.value++
+  })
   loading.value = true
   try {
     await auth.ensureReady()
     if (auth.userId) await app.load()
+    reportHoliday()
   } finally {
     loading.value = false
   }
 })
 onUnmounted(() => {
   window.removeEventListener('paytrace:pref-changed', onPrefChange)
+  window.removeEventListener('paytrace:transactions-changed', onTxChange)
   window.removeEventListener('storage', onPrefChange)
+  unsubFlow?.()
 })
 </script>
 

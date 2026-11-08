@@ -59,6 +59,27 @@ function emitPrefChange(key) {
   }
 }
 
+// ============================================================
+// 后端适配器：当前余额 / 每月固定还款 / 年内历史薪资 改为后端权威存储
+// ------------------------------------------------------------
+// demo / 离线 / 未登录时 adapter 为 null，全部回落 localStorage（保持旧行为）。
+// 真实后端可用时由 stores/app.js 注册；读优先后端 profiles 新列，写同步落本地+异步写后端。
+// ============================================================
+let backendAdapter = null
+export function setBackendAdapter(a) {
+  backendAdapter = a || null
+}
+const adapterReady = () => !!(backendAdapter && typeof backendAdapter.getProfile === 'function')
+
+// 双源读取的唯一入口：优先后端 profiles 列，未就绪 / 无值返回 undefined，
+// 调用方据此回落 localStorage。所有后端优先读取都走这里，避免列名与
+// 就绪判断散落各处导致「有的读后端、有的不读」的双重真相。
+function readBackendValue(column) {
+  if (!adapterReady()) return undefined
+  const p = backendAdapter.getProfile()
+  return p && p[column] != null ? p[column] : undefined
+}
+
 export function readPref(key, fallback) {
   const s = storage()
   if (!s) return fallback
@@ -138,7 +159,10 @@ export function migrateLegacy(legacyKeyName, prefKey, fallback) {
 
 // 期初余额：仪表盘与月度对账必须共用同一个值，否则同一个月会出现两个预测基准。
 // 兼容早期只在账本页落盘的 reconcileStart。
+// 后端 current_balance 已作为「当前真实余额」权威源，且与期初同步，优先取之。
 export function readStartBalance() {
+  const backend = readBackendValue('current_balance')
+  if (backend != null) return Math.max(0, Number(backend) || 0)
   const cur = readPref('startBalance', null)
   if (cur != null) return Math.max(0, Number(cur) || 0)
   const legacy = readPref('reconcileStart', null)
@@ -151,7 +175,10 @@ export function readStartBalance() {
 }
 
 export function writeStartBalance(value) {
-  writePref('startBalance', Math.max(0, Number(value) || 0))
+  const v = Math.max(0, Number(value) || 0)
+  writePref('startBalance', v)
+  // 期初与当前余额同源：写期初也同步后端 current_balance，保证权威值一致
+  if (adapterReady()) backendAdapter.saveCurrentBalance(v, { reason: '对账调整期初', kind: 'update' }).catch(() => {})
 }
 
 // 月固定开支的日度口径：所有页面必须共用同一个值，否则日历与仪表盘会对不上。
@@ -172,8 +199,51 @@ export function writeExpenseSpreadMode(mode) {
 }
 
 // 每月固定还款：仪表盘与日历必须读同一个偏好（含旧 key 兼容）
+// 后端 profiles.recurring_repayment 为权威源，优先取之。
 export function readRecurringRepayment() {
+  const backend = readBackendValue('recurring_repayment')
+  if (backend != null) return Number(backend) || 0
   return Number(migrateLegacy('paytrace:forecast-recurring', 'recurringRepayment', 0)) || 0
+}
+
+// 写：同步落本地 + 异步写后端（失败不影响本地使用）
+export function writeRecurringRepayment(value) {
+  const v = Math.max(0, Number(value) || 0)
+  writePref('recurringRepayment', v)
+  if (adapterReady()) backendAdapter.saveRecurringRepayment(v).catch(() => {})
+}
+
+// 调薪假设（情景试算）：仪表盘与日历必须读同一个偏好，否则拖滑块只有仪表盘变。
+// 默认 6000 与 Dashboard 初始档位一致；未手动调过时回落此默认值，两页同源。
+export function readAssumePreTax() {
+  const v = readPref('assumePreTax', null)
+  return v != null ? (Number(v) || 0) : 6000
+}
+export function writeAssumePreTax(v) {
+  writePref('assumePreTax', Math.max(0, Number(v) || 0))
+}
+
+// 年内历史薪资（累计预扣个税用）：后端 profiles.salary_ytd(jsonb) 为权威源
+export function readSalaryYtd(fallback = []) {
+  const backend = readBackendValue('salary_ytd')
+  if (Array.isArray(backend) && backend.length) return backend
+  return readPref('salaryYtd', fallback)
+}
+
+export function writeSalaryYtd(arr) {
+  writePref('salaryYtd', arr)
+  if (adapterReady()) backendAdapter.saveSalaryYtd(arr).catch(() => {})
+}
+
+// 补贴情景：开关 / 金额 / 到账日，仪表盘与日历共用，保证试算联动。
+export function readScenarioBonusEnabled() {
+  return !!readPref('scenarioBonusEnabled', false)
+}
+export function readScenarioBonus() {
+  return Number(readPref('scenarioBonus', 0)) || 0
+}
+export function readScenarioBonusDay() {
+  return Number(readPref('scenarioBonusDay', 15)) || 15
 }
 
 // ============================================================
@@ -193,6 +263,21 @@ const cents = (n) => Math.round(Number(n) * 100)
 const yuan = (c) => c / 100
 
 export function readCurrentBalance() {
+  // 后端 profiles.current_balance 为权威源；台账优先读后端 balance_log（已随档案加载）
+  const backendBalance = readBackendValue('current_balance')
+  if (backendBalance != null) {
+    const p = backendAdapter.getProfile()
+    const backendLog = (typeof backendAdapter.getBalanceLog === 'function' && backendAdapter.getBalanceLog()) || []
+    // 后端台账为空时回落本地历史台账，避免切换到后端后已记录的历史消失
+    const local = readPref(BALANCE_KEY, null)
+    const localLog = (local && Array.isArray(local.log)) ? local.log : []
+    const log = backendLog.length ? backendLog : localLog
+    return {
+      value: Number(backendBalance),
+      updatedAt: p?.updated_at ? String(p.updated_at).slice(0, 10) : (local?.updatedAt || ''),
+      log
+    }
+  }
   const v = readPref(BALANCE_KEY, null)
   if (!v || typeof v !== 'object') return { value: null, updatedAt: '', log: [] }
   const n = Number(v.value)
@@ -227,6 +312,10 @@ export function writeCurrentBalance(value, options = {}) {
   log.push(rec)
   // value 与 log 一次写入，不可拆分，天然一致
   writePref(BALANCE_KEY, { value: yuan(c), updatedAt: todayISO(), log })
+  // 同步写后端：upsert current_balance + insert balance_log（fire-and-forget）
+  if (adapterReady()) {
+    backendAdapter.saveCurrentBalance(n, rec).catch(() => {})
+  }
   return rec
 }
 

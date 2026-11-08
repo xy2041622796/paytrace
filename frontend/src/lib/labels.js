@@ -29,6 +29,14 @@ export const RISK_LEVEL_LABEL = {
   info: '状态良好'
 }
 
+// PRD FR-14 对外的「高 / 中」两级语义；内部仍保留红/橙/黄/info 细分用于排序与着色
+export const RISK_TIER_LABEL = {
+  red: '高风险',
+  orange: '中风险',
+  yellow: '中风险',
+  info: '提示'
+}
+
 export const SOURCE_LABEL = {
   manual: '手动录入',
   ai: '智能记账'

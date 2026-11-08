@@ -20,22 +20,23 @@
       还没有薪资档案，下方数字仅为占位推演。请先到「档案配置」填写税前月薪与社保基数。
     </n-alert>
 
-    <!-- 还款到期提醒：提前 3 天 / 1 天 / 当天 / 逾期 -->
+    <!-- 还款到期提醒：3 天 / 1 天 / 当天 / 逾期分级，可已读 / 一键标记已还 -->
     <n-alert
       v-if="repayReminders.length"
-      :type="repayReminders.some((r) => r.days < 0) ? 'error' : 'warning'"
+      :type="repayReminders.some((r) => r.level === 'overdue') ? 'error' : 'warning'"
       :bordered="false"
       class="repay-alert stagger-in"
     >
-      <template #header>还款提醒（{{ repayReminders.length }} 笔）</template>
-      <div v-for="r in repayReminders" :key="r.id" class="remind-row">
-        <b :class="{ 'text-danger': r.days < 0 }">
-          {{ r.days < 0 ? `已逾期 ${-r.days} 天` : r.days === 0 ? '今天到期' : `还有 ${r.days} 天` }}
+      <template #header>还款提醒（{{ unreadReminderCount }} 笔待读 / 共 {{ repayReminders.length }} 笔）</template>
+      <div v-for="r in repayReminders" :key="r.id" class="remind-row" :class="{ 'is-read': r.read }">
+        <b :class="{ 'text-danger': r.level === 'overdue' }">
+          {{ REMINDER_LEVEL_LABEL[r.level] }}<span v-if="r.level === 'overdue'"> {{ -r.days }} 天</span>
         </b>
         <span> · {{ r.due_date }} · {{ formatMoney(r.amount) }}</span>
-        <span v-if="r.status === 'overdue'" class="text-danger"> · 已标记逾期</span>
+        <n-button size="tiny" quaternary :disabled="r.read" @click="ackReminder(r)">{{ r.read ? '已读' : '标记已读' }}</n-button>
+        <n-button size="tiny" quaternary type="primary" :disabled="savingRepay" @click="markReminderPaid(r)">标记已还</n-button>
       </div>
-      <div class="muted">到期前 3 天、1 天与当天在此提醒；还完请到「档案配置 → 还款日历」标记已还。</div>
+      <div class="muted">到期前 3 天、1 天与当天分级提醒，逾期升级为高风险；状态机会自动流转「待还 → 已提醒 → 已还 / 已逾期」。</div>
     </n-alert>
 
     <!-- 首屏横幅：「现在还剩多少」。真实余额由用户维护，与推演值严格分开摆放 -->
@@ -66,8 +67,7 @@
       </div>
       <div class="hero-side">
         <n-button v-if="!editingBalance" size="small" type="primary" @click="startEditBalance">更新余额</n-button>
-        <n-button size="small" tertiary :disabled="currentBalance.value == null" @click="syncToStart">设为推演期初</n-button>
-        <p class="hero-hint muted">下面的「月末预计 / 月内最低」是<b>推演值</b>，不是你手里的钱。<br />想让预测贴近现实，点一下「设为推演期初」。</p>
+        <p class="hero-hint muted">下面的「月末预计 / 月内最低」是<b>推演值</b>，不是你手里的钱。<br />你更新余额后，预测会自动从这笔钱往后算。</p>
       </div>
     </section>
 
@@ -122,57 +122,23 @@
       </StatCard>
     </div>
 
-    <!-- 主图表 + 侧栏：非对称两栏，图表占主，侧栏放口径与起点 -->
-    <div class="dash-split">
-      <SectionCard class="chart-card" title="现金余额走势（逐日 · 多薪资情景）" icon="chart">
-        <CashflowTimeline
-          :dates="cf.dates"
-          :day-types="cf.dayTypes"
-          :events="cf.events"
-          :series="cf.series"
-          :main-label="cf.mainLabel"
-        />
-        <div class="pt-legend">
-          <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--success" /> 发薪到账</span>
-          <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--danger" /> 还款扣款</span>
-          <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--warning" /> 固定开支</span>
-          <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--info" /> 零线</span>
-        </div>
-        <div class="type-tip muted">节点日历属性（悬停查看）：工作日 / 周末 / 法定节假日 / 调休补班</div>
-      </SectionCard>
-
-      <div class="pt-stack">
-        <!-- 推演起点：模型从月初 1 号起算用的假设值，与首屏「现在还剩」是两个概念 -->
-        <SectionCard class="core-config" title="推演起点" icon="target" muted>
-          <div class="field-label">推演起点 · 期初余额（月初 1 号的假设值，不是你现在手里的钱）</div>
-          <div class="core-row">
-            <n-input-number v-model:value="startBalance" :min="0" size="small" style="width:160px" />
-            <span class="muted core-hint">下面的预测都从这个数开始算；想用真实余额，点首屏「设为推演期初」。</span>
-          </div>
-        </SectionCard>
-
-        <!-- 只读口径卡：把「数字怎么来的」摊开给用户看，不提供任何编辑入口 -->
-        <SectionCard class="caliber-card" title="推演口径（只读）" icon="book">
-          <div class="caliber-grid">
-            <div class="caliber-item">
-              <div class="field-label">公司用工附加成本</div>
-              <div class="ro">{{ formatMoney(companyCost) }}</div>
-              <div class="muted caliber-note">公司缴纳的社保 / 公积金合计，不从工资里扣，仅作用工成本参考。</div>
-            </div>
-            <div class="caliber-item">
-              <div class="field-label">社保比例来源</div>
-              <div class="ro">{{ insuranceSourceLabel }}</div>
-              <div class="muted caliber-note">{{ insuranceSourceNote }}</div>
-            </div>
-            <div class="caliber-item">
-              <div class="field-label">月固定开支口径</div>
-              <div class="ro">{{ expenseSpreadLabel }}</div>
-              <div class="muted caliber-note">{{ expenseSpreadNote }}</div>
-            </div>
-          </div>
-        </SectionCard>
+    <!-- 现金余额走势：与日历、前瞻同源，是本月逐日推演的可视化 -->
+    <SectionCard class="chart-card" title="现金余额走势（逐日 · 多薪资情景）" icon="chart">
+      <CashflowTimeline
+        :dates="cf.dates"
+        :day-types="cf.dayTypes"
+        :events="cf.events"
+        :series="cf.series"
+        :main-label="cf.mainLabel"
+      />
+      <div class="pt-legend">
+        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--success" /> 发薪到账</span>
+        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--danger" /> 还款扣款</span>
+        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--warning" /> 固定开支</span>
+        <span class="pt-legend-item"><i class="pt-legend-dot pt-legend-dot--info" /> 零线</span>
       </div>
-    </div>
+      <div class="type-tip muted">节点日历属性（悬停查看）：工作日 / 周末 / 法定节假日 / 调休补班</div>
+    </SectionCard>
 
     <!-- 次要内容统一折叠收纳 -->
     <n-collapse :default-expanded-names="['risk']" class="dash-collapse">
@@ -187,7 +153,7 @@
           :class="'lv-' + w.level"
         >
           <div class="risk-head">
-            <StatusChip tone="danger">{{ levelLabel[w.level] }}</StatusChip>
+            <StatusChip tone="danger">{{ riskTierLabel[w.level] }}</StatusChip>
             <b>{{ w.title }}</b>
             <span class="risk-date">{{ w.date }}</span>
           </div>
@@ -215,9 +181,10 @@
               <n-input-number v-model:value="assumePreTax" :min="0" size="small" style="width:130px" />
               <span class="muted">元 · 也可自定义</span>
             </div>
+            <n-slider v-model:value="assumePreTax" :min="3000" :max="10000" :step="100" class="tier-slider" />
           </div>
         </div>
-        <p class="muted fc-tip">点选快捷档位或自定义金额，即可预览「如果涨薪到 X」后的余额与风险，当前档位高亮；仅为试算值，不写库、不改变档案。</p>
+        <p class="muted fc-tip">拖动滑块或点选快捷档位，即可实时预览「如果涨薪到 X」后的余额曲线与风险，当前档位高亮；仅为试算值，不写库、不改变档案。</p>
       </n-collapse-item>
 
       <n-collapse-item title="补贴到账试算" name="bonus">
@@ -230,20 +197,25 @@
           />
           <span class="muted">元 · 拟到账的一次性收入（如补贴 / 奖金）</span>
         </div>
+        <n-slider v-model:value="scenarioBonus" :min="0" :max="5000" :step="50" :disabled="!bonusEnabled" class="tier-slider" />
+        <div class="bonus-tools">
+          <span class="muted">到账日（每月几号）</span>
+          <n-input-number v-model:value="bonusDay" :min="1" :max="28" size="small" style="width:110px" :disabled="!bonusEnabled" />
+          <span class="muted">按所选日期进入当月推演曲线</span>
+        </div>
         <div v-if="bonusEnabled" class="bonus-result">
           <div class="bonus-head">
             <span class="trial-badge">试算值 · 不写库</span>
             <b>假设这笔未来一次性收入到账</b>
           </div>
-          <div class="bonus-row"><span>拟到账补贴</span><b>+ {{ formatMoney(scenarioBonus) }}</b></div>
-          <div class="bonus-row"><span>月末预计余额（预测曲线）</span><b>{{ formatMoney(cf.monthEnd) }}</b></div>
+          <div class="bonus-row"><span>拟到账补贴（已进入曲线）</span><b>+ {{ formatMoney(scenarioBonus) }}</b></div>
           <div class="bonus-row">
-            <span>试算后月末余额 = 月末预计余额 + 补贴</span>
-            <b :class="bonusTrialEnd < 0 ? 'text-danger' : 'text-success'">{{ formatMoney(bonusTrialEnd) }}</b>
+            <span>试算后月末预计余额</span>
+            <b :class="cf.monthEnd < 0 ? 'text-danger' : 'text-success'">{{ formatMoney(cf.monthEnd) }}</b>
           </div>
-          <p class="muted fc-tip">以上为「假设一次性收入到账」的试算值，不写库、不改变预测曲线，也不代表真实余额；真正到账请到「流水账本 · 待收收入」正式录入。</p>
+          <p class="muted fc-tip">这笔试算收入已按上面到账日进入本页曲线与多月前瞻，并联动风险与目标达成度；不写库、不改变档案，日历仍按正式档案推演。真正到账请到「流水账本 · 待收收入」正式录入。</p>
         </div>
-        <p v-else class="muted fc-tip">默认关闭。开启后可试算一笔未来一次性收入对余额的影响；金额仅保存在本机偏好，不写库、不改变预测曲线。</p>
+        <p v-else class="muted fc-tip">默认关闭。开启后可试算一笔未来一次性收入对余额曲线的影响；金额与到账日仅保存在本机偏好，不写库。</p>
       </n-collapse-item>
 
       <n-collapse-item title="应急备用金目标" name="cushion">
@@ -305,12 +277,20 @@ import { buildProjection } from '../composables/useProjection'
 import CashflowTimeline from '../components/CashflowTimeline.vue'
 import Mascot from '../components/Mascot.vue'
 import {
-  RISK_LEVEL_LABEL as levelLabel, formatMoney, formatDateTimeCN
+  RISK_LEVEL_LABEL as levelLabel, RISK_TIER_LABEL as riskTierLabel,
+  formatMoney, formatDateTimeCN
 } from '../lib/labels'
+import { trackEvent } from '../lib/analytics'
+import { subscribeFlowChange } from '../lib/flowChannel'
 import {
-  readPref, writePref, migrateLegacy, readStartBalance, writeStartBalance,
-  readExpenseSpreadMode, readCurrentBalance, writeCurrentBalance,
-  readBalanceLog, verifyBalanceLog
+  buildReminders, reminderKey, isReminderRead, markReminderRead,
+  REMINDER_LEVEL_LABEL, syncRepaymentStatuses
+} from '../lib/reminders'
+import {
+  readPref, writePref, readStartBalance, writeStartBalance,
+  readCurrentBalance, writeCurrentBalance,
+  readRecurringRepayment, writeRecurringRepayment,
+  readBalanceLog, verifyBalanceLog, readAssumePreTax, writeAssumePreTax
 } from '../lib/prefs'
 import { round2 } from '../lib/validation'
 import { todayISO } from '../lib/date'
@@ -322,16 +302,16 @@ const app = useAppStore()
 const loading = ref(true)
 const refreshing = ref(false)
 const startBalance = ref(readStartBalance())
-const assumePreTax = ref(6000)
+const assumePreTax = ref(readAssumePreTax())
 const quickTiers = [4000, 5000, 5500, 6000]
 const forecastMonths = ref(6)
 const targetCushion = ref(readPref('cushionTarget', 2000))
-const recurringRepayment = ref(
-  migrateLegacy('paytrace:forecast-recurring', 'recurringRepayment', 0)
-)
+const recurringRepayment = ref(readRecurringRepayment())
 // 补贴到账试算：开关默认关，金额存本机偏好；只用于展示，绝不进入 buildProjection
 const bonusEnabled = ref(readPref('scenarioBonusEnabled', false))
 const scenarioBonus = ref(Number(readPref('scenarioBonus', 0)) || 0)
+const bonusDay = ref(Number(readPref('scenarioBonusDay', 15)) || 15)
+const savingRepay = ref(false)
 
 // 「现在还剩多少」：真实余额，与期初/推演余额分开存放。
 // 用户口述金额时，由 Agent 通过「更新余额」输入框写入；跨标签同步靠偏好事件。
@@ -379,23 +359,21 @@ function saveBalance() {
     return message.info('金额和之前一样，没有产生变动，未记新账')
   }
   writeCurrentBalance(next, { reason: balanceReason.value })
+  // 真实余额即推演起点：更新真实余额后自动同步期初，仪表盘 / 日历 / 前瞻同源联动
+  writeStartBalance(next)
+  startBalance.value = next
   currentBalance.value = readCurrentBalance()
   refreshBalanceLog()
   editingBalance.value = false
   balanceReason.value = ''
-  message.success('已记下余额，并写入变动记录')
-}
-// 只把余额同步为推演起点，余额本身没变，台账不记（台账只记录真实金额变动）
-function syncToStart() {
-  const v = currentBalance.value.value
-  if (v == null) return
-  writeStartBalance(v)
-  startBalance.value = v
-  message.success('已把当前余额设为推演期初')
+  message.success('已记下余额，并同步到预测起点')
 }
 
 // 本机偏好变更后，让推演立即重算（同页自定义事件 + 跨标签页 storage）
 const prefRevision = ref(0)
+// 流水变更后强制重算推演（store 里的 transactions 已是最新值）
+const onTxChange = () => { prefRevision.value++ }
+let unsubFlow = null
 const onPrefChange = () => {
   prefRevision.value++
   // 账本页或另一个标签页改了期初余额，这里同步，保证两处推演基准一致
@@ -424,48 +402,47 @@ const projection = computed(() => {
     year,
     month,
     recurringRepayment: recurringRepayment.value,
-    months: forecastMonths.value
+    months: forecastMonths.value,
+    // 已记流水叠加进推演：记一笔 / AI 写入后曲线随之更新（PRD FR-07/FR-09）
+    actuals: app.transactions,
+    // 情景模拟：补贴按到账日进入统一推演，联动曲线 / 风险 / 目标
+    bonus: bonusEnabled.value
+      ? { amount: Number(scenarioBonus.value) || 0, day: Number(bonusDay.value) || 15 }
+      : null
   })
 })
 const cf = computed(() => projection.value.cf)
 
-// 站内还款提醒：未标记已还、且距到期 ≤3 天（含当天与逾期）的账单
-// 用今天(GMT+8)与账单日的自然日差，避免时间戳时区把日期算错一天
+// 站内还款提醒：3 天 / 1 天 / 当天 / 逾期分级 + 已读持久化
 const repayReminders = computed(() => {
-  const base = new Date(`${todayISO()}T00:00:00`).getTime()
-  return (app.repayments || [])
-    .filter((r) => r.status !== 'paid' && r.due_date)
-    .map((r) => ({
-      ...r,
-      days: Math.round((new Date(`${r.due_date}T00:00:00`).getTime() - base) / 86400000)
-    }))
-    .filter((r) => Number.isFinite(r.days) && r.days <= 3)
-    .sort((a, b) => a.days - b.days)
+  void prefRevision.value
+  return buildReminders(app.repayments || [], todayISO())
+    .map((r) => ({ ...r, read: isReminderRead(reminderKey(r)) }))
 })
+const unreadReminderCount = computed(() => repayReminders.value.filter((r) => !r.read).length)
+function ackReminder(r) {
+  markReminderRead(reminderKey(r))
+  prefRevision.value++
+}
+async function markReminderPaid(r) {
+  if (savingRepay.value) return
+  savingRepay.value = true
+  try {
+    await app.setRepaymentStatus(r.id, 'paid')
+    await app.load({ force: true })
+    message.success('已标记还清，提醒已解除')
+  } catch (e) {
+    message.error(e.message || '操作失败')
+  } finally {
+    savingRepay.value = false
+  }
+}
 const forecast = computed(() => projection.value.forecast)
 const netNow = computed(() => projection.value.netNow)
 const ytdCount = computed(() => projection.value.ytdCount)
 const taxHint = computed(() => ytdCount.value
   ? `个税已按你录入的 ${ytdCount.value} 个月真实薪资精确累计。`
   : '个税按「年内每月薪资相同」估算；若年内调过薪，可到「档案配置」录入历史薪资校准。')
-
-// 只读口径：全部取自统一推演入口，避免各页面另算一套
-const companyCost = computed(() => Number(projection.value.companyCost) || 0)
-const rulesMatched = computed(() => Number(projection.value.rules?.matched) || 0)
-const insuranceSourceLabel = computed(() => rulesMatched.value > 0 ? '规则表' : '内置兜底')
-const insuranceSourceNote = computed(() => rulesMatched.value > 0
-  ? `已命中 ${rulesMatched.value} 条社保 / 公积金规则，比例来自 insurance_rule 规则表。`
-  : '规则表无匹配数据，比例回落为武汉 2026 内置兜底值。')
-const expenseSpreadLabel = computed(() => {
-  void prefRevision.value
-  return readExpenseSpreadMode() === 'daily' ? '月固定开支按日均摊' : '月固定开支按扣款日计入'
-})
-const expenseSpreadNote = computed(() => expenseSpreadLabel.value === '月固定开支按日均摊'
-  ? '月固定开支按当月天数均摊到每一天，更贴近日常零花的真实节奏。'
-  : '月固定开支全部计入扣费日当天，不做日均摊。')
-
-// 补贴试算：仅在展示层把「月末预计余额」加上补贴，不写库、不进预测曲线
-const bonusTrialEnd = computed(() => round2(cf.value.monthEnd + (Number(scenarioBonus.value) || 0)))
 
 // 目标安全垫
 const cushionTarget = computed(() => Math.max(0, Number(targetCushion.value) || 0))
@@ -496,16 +473,34 @@ function debounced(fn, ms) {
 }
 const writers = [
   debounced((v) => writeStartBalance(v), 250),
-  debounced((v) => writePref('recurringRepayment', Number(v) || 0), 250),
+  debounced((v) => writeRecurringRepayment(Number(v) || 0), 250),
   debounced((v) => writePref('cushionTarget', Number(v) || 0), 250),
   debounced((v) => writePref('scenarioBonus', Number(v) || 0), 250),
-  debounced((v) => writePref('scenarioBonusEnabled', !!v), 250)
+  debounced((v) => writePref('scenarioBonusEnabled', !!v), 250),
+  debounced((v) => writePref('scenarioBonusDay', Number(v) || 15), 250),
+  debounced((v) => writeAssumePreTax(v), 250)
 ]
 watch(startBalance, (v) => writers[0](v))
 watch(recurringRepayment, (v) => writers[1](v))
 watch(targetCushion, (v) => writers[2](v))
 watch(scenarioBonus, (v) => writers[3](v))
 watch(bonusEnabled, (v) => writers[4](v))
+watch(bonusDay, (v) => writers[5](v))
+watch(assumePreTax, (v) => writers[6](v))
+
+// 埋点：情景切换 / 现金转负 / 还款提醒（去重键见 analytics.js）
+watch(assumePreTax, (v) => trackEvent('scenario_switched', { field: 'assumePreTax', value: v }, String(v)))
+watch(bonusEnabled, (v) => trackEvent('scenario_switched', { field: 'bonusEnabled', value: v }, `bonus:${v}`))
+watch(() => cf.value.negativeFrom, (v) => {
+  if (v != null) trackEvent('cashflow_negative_viewed', { day: v }, `${year}-${month}:${v}`)
+}, { immediate: true })
+watch(repayReminders, (list) => {
+  list.filter((r) => !r.read).forEach((r) => trackEvent(
+    'repayment_reminder_sent',
+    { due_date: r.due_date, days: r.days, level: r.level },
+    `${r.id}:${r.level}`
+  ))
+}, { immediate: true })
 
 async function forceRefresh() {
   refreshing.value = true
@@ -525,6 +520,9 @@ async function loadData() {
     await auth.ensureReady()
     if (!auth.userId) return
     await app.load()
+    // 还款状态机自动流转：待还 → 已提醒 → 已逾期（不覆盖手动标记）
+    const sync = await syncRepaymentStatuses(app.repayments || [], todayISO())
+    if (sync.changed) await app.load({ force: true })
     // 空档案时页面内已有常驻提示，不再额外弹一次浮动消息
   } catch (e) {
     message.error(e.message || '加载失败')
@@ -535,14 +533,22 @@ async function loadData() {
 
 onMounted(() => {
   window.addEventListener('paytrace:pref-changed', onPrefChange)
+  window.addEventListener('paytrace:transactions-changed', onTxChange)
   window.addEventListener('storage', onPrefChange)
+  unsubFlow = subscribeFlowChange(() => {
+    // 另一个标签页写了流水：静默重拉，避免广播 / storage 循环
+    app.reloadTransactions({ silent: true }).catch(() => {})
+    prefRevision.value++
+  })
   loadData()
 })
 onBeforeUnmount(() => {
   // 卸载后不再落盘，避免防抖定时器写入已失效的偏好
   writers.forEach((w) => w.cancel())
   window.removeEventListener('paytrace:pref-changed', onPrefChange)
+  window.removeEventListener('paytrace:transactions-changed', onTxChange)
   window.removeEventListener('storage', onPrefChange)
+  unsubFlow?.()
 })
 </script>
 
@@ -569,7 +575,8 @@ onBeforeUnmount(() => {
 }
 .empty-alert { margin: 0 0 14px; }
 .repay-alert { margin: 0 0 14px; }
-.remind-row { font-size: 13px; line-height: 1.9; }
+.remind-row { font-size: 13px; line-height: 1.9; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.remind-row.is-read { opacity: .58; }
 
 /* 首屏横幅：全宽 accent 带，左对齐；与旧版居中 hero 卡形成差异 */
 .dash-hero {
@@ -640,6 +647,7 @@ onBeforeUnmount(() => {
 .config-row { display: flex; gap: 24px; margin: 6px 0; flex-wrap: wrap; align-items: flex-end; }
 .cfg-item { display: flex; flex-direction: column; gap: 6px; }
 .tier-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tier-slider { margin-top: 14px; max-width: 520px; }
 .tier-row .muted { font-size: 12px; }
 .fc-tip { margin-top: 8px; font-size: 12px; line-height: 1.6; }
 .bonus-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

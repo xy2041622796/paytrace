@@ -37,7 +37,7 @@
             <circle cx="108" cy="30" r="4" fill="#FF9A6C" />
           </svg>
         </div>
-        <div class="mini-foot"><span>发薪 11/15</span><span>还款 11/25</span><span>月末结余 <b>2,180.00</b></span></div>
+        <div class="mini-foot"><span>发薪日 · 自动到账</span><span>还款日 · 提前提醒</span><span>月末结余 · 一眼看清</span></div>
       </div>
       <p class="brand-disclaimer">预测基于你的档案与假设，仅供参考，不构成理财建议。</p>
     </section>
@@ -92,6 +92,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { isDemoMode } from '../lib/supabase'
+import { trackEvent } from '../lib/analytics'
 
 const router = useRouter()
 const route = useRoute()
@@ -111,11 +112,23 @@ const loading = ref(false)
 const error = ref('')
 const hint = ref('')
 
+// 客户端前置校验：把 Supabase 的 cryptic 报错（弱密码、非法邮箱）换成可读提示，
+// 也避免把明显非法的凭据发往服务端。服务端仍是最权威的校验方。
+function validate() {
+  const u = username.value.trim()
+  if (!u) return '请输入用户名'
+  if (/\s/.test(username.value)) return '用户名不能包含空格'
+  if (!password.value) return '请输入密码'
+  if (password.value.length < 6) return '密码至少 6 位'
+  return ''
+}
+
 async function onSubmit() {
   error.value = ''
   hint.value = ''
-  if (!username.value || !password.value) {
-    error.value = '请输入用户名和密码'
+  const ve = validate()
+  if (ve) {
+    error.value = ve
     return
   }
   loading.value = true
@@ -124,6 +137,7 @@ async function onSubmit() {
       await auth.login(username.value, password.value)
     } else {
       const { session } = await auth.register(username.value, password.value)
+      trackEvent('register_complete', { confirmed: !!session }, username.value)
       // 若 Supabase 开启了邮箱确认，session 为 null
       if (!session) {
         hint.value = '注册成功，请查收验证邮件后登录（若已关闭确认将自动登录）'

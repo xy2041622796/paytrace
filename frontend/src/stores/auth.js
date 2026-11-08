@@ -78,12 +78,18 @@ export const useAuthStore = defineStore('auth', {
     },
     async logout() {
       const uid = this.userId
-      await supabase.auth.signOut()
-      // 清档案缓存 + 清当前账号的本机偏好（含年内真实薪资），避免下一个账号串数据
-      clearCache(uid)
-      clearPrefs()
-      invalidatePrivacyMask()
-      this.user = null
+      try {
+        await supabase.auth.signOut()
+      } catch (e) {
+        // 服务端登出失败（网络中断等）不能把用户卡在登录态，更不能把敏感偏好留给下一个账号
+        console.warn('[paytrace] 服务端登出失败，已清理本机会话：', e?.message || e)
+      } finally {
+        // 清档案缓存 + 清当前账号的本机偏好（含年内真实薪资），避免下一个账号串数据
+        clearCache(uid)
+        clearPrefs()
+        invalidatePrivacyMask()
+        this.user = null
+      }
     }
   }
 })

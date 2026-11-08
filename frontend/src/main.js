@@ -5,12 +5,13 @@ import {
   NAlert, NButton, NCard, NCollapse, NCollapseItem,
   NDataTable, NDatePicker, NDivider, NForm, NFormItem,
   NInput, NInputNumber, NRadioButton, NRadioGroup,
-  NSelect, NSwitch, NTabPane, NTabs
+  NSelect, NSlider, NSwitch, NTabPane, NTabs
 } from 'naive-ui'
 import App from './App.vue'
 import router from './router'
 import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
+import { useAppStore } from './stores/app'
 import AppIcon from './components/AppIcon.vue'
 import PageHeader from './components/PageHeader.vue'
 import SectionCard from './components/SectionCard.vue'
@@ -28,7 +29,7 @@ const components = {
   NAlert, NButton, NCard, NCollapse, NCollapseItem,
   NDataTable, NDatePicker, NDivider, NForm, NFormItem,
   NInput, NInputNumber, NRadioButton, NRadioGroup,
-  NSelect, NSwitch, NTabPane, NTabs
+  NSelect, NSlider, NSwitch, NTabPane, NTabs
 }
 Object.entries(components).forEach(([name, component]) => app.component(name, component))
 
@@ -54,6 +55,8 @@ app.config.errorHandler = (err, _instance, info) => {
 
 app.use(createPinia())
 useThemeStore().init() // mount 前定主题，避免首屏闪白
+// 注册后端适配器：当前余额 / 每月固定还款 / 年内历史薪资 改为 Supabase 权威存储
+useAppStore().registerPrefsAdapter()
 app.use(router)
 app.mount('#app')
 

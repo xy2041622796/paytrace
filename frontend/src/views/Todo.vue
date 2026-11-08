@@ -33,18 +33,29 @@
         <span v-else class="todo-src">还款日历</span>
 
         <div class="todo-main">
-          <div class="todo-title" :class="{ 'text-danger': t.overdue }">{{ t.title }}</div>
-          <div class="todo-sub">
-            <span v-if="t.related_repay_date">{{ formatDateCN(t.related_repay_date) }}</span>
-            <span v-if="t.amount && t.linked" :class="t.overdue ? 'text-danger' : ''">{{ formatMoney(t.amount) }}</span>
-            <span v-if="t.daysLeft != null" :class="t.daysLeft < 0 ? 'text-danger' : (t.daysLeft <= 3 ? 'text-warning' : 'muted')">{{ t.daysLeft < 0 ? `逾期 ${-t.daysLeft} 天` : (t.daysLeft === 0 ? '今天到期' : t.daysLeft + ' 天') }}</span>
+          <div v-if="editingId === t.id" class="todo-edit" @click.stop>
+            <n-input v-model:value="editTitle" size="small" placeholder="待办内容" style="width:240px" />
+            <n-date-picker v-model:value="editDate" type="date" clearable size="small" placeholder="关联日期（可选）" />
+            <n-button size="small" type="primary" @click="saveEdit(t)">保存</n-button>
+            <n-button size="small" @click="cancelEdit">取消</n-button>
           </div>
+          <template v-else>
+            <div class="todo-title" :class="{ 'text-danger': t.overdue }">{{ t.title }}</div>
+            <div class="todo-sub">
+              <span v-if="t.related_repay_date">{{ formatDateCN(t.related_repay_date) }}</span>
+              <span v-if="t.amount && t.linked" :class="t.overdue ? 'text-danger' : ''">{{ formatMoney(t.amount) }}</span>
+              <span v-if="t.daysLeft != null" :class="t.daysLeft < 0 ? 'text-danger' : (t.daysLeft <= 3 ? 'text-warning' : 'muted')">{{ t.daysLeft < 0 ? `逾期 ${-t.daysLeft} 天` : (t.daysLeft === 0 ? '今天到期' : t.daysLeft + ' 天') }}</span>
+            </div>
+          </template>
         </div>
 
         <span class="todo-badge" :class="priorityOf(t) === 0 ? 'b-urgent' : (priorityOf(t) === 1 ? 'b-soon' : 'b-mute')">{{ PRIORITY_LABEL[priorityOf(t)] }}</span>
 
         <button v-if="t.linked" type="button" class="todo-go" @click.stop="goCalendar">查看</button>
-        <button v-else type="button" class="todo-del" @click.stop="del(t)">删除</button>
+        <template v-else>
+          <button type="button" class="todo-edit-btn" @click.stop="startEdit(t)">编辑</button>
+          <button type="button" class="todo-del" @click.stop="del(t)">删除</button>
+        </template>
       </div>
 
       <EmptyState v-if="!displayTodos.length" text="暂无待办事项，添加一条开始规划吧。" icon="inbox" class="todo-empty" />
@@ -236,6 +247,29 @@ async function del(row) {
   await load()
 }
 
+// 行内编辑：标题与关联日期，录入有误时不必删了重建
+const editingId = ref(null)
+const editTitle = ref('')
+const editDate = ref(null)
+function startEdit(t) {
+  editingId.value = t.id
+  editTitle.value = t.title || ''
+  editDate.value = t.related_repay_date
+    ? new Date(`${t.related_repay_date}T00:00:00`).getTime()
+    : null
+}
+function cancelEdit() { editingId.value = null }
+async function saveEdit(t) {
+  const title = editTitle.value.trim().slice(0, 120)
+  if (!title) return message.warning('请填写待办内容')
+  const { error } = await supabase.from('todo')
+    .update({ title, related_repay_date: toLocalISODate(editDate.value) })
+    .eq('id', t.id)
+  if (error) return message.error(error.message)
+  editingId.value = null
+  await load()
+}
+
 async function load() {
   await auth.ensureReady()
   const userId = auth.userId
@@ -246,8 +280,10 @@ async function load() {
   } catch (e) {
     message.error(e.message || '档案加载失败')
   }
-  const { data } = await supabase.from('todo').select('*')
+  const { data, error } = await supabase.from('todo').select('*')
     .eq('user_id', userId).order('created_at', { ascending: false })
+  // 查询失败不能静默显示空状态，否则用户会误以为待办被清空
+  if (error) return message.error(error.message || '待办加载失败，请刷新重试')
   todos.value = (data || []).sort((a, b) => priorityOf(a) - priorityOf(b))
 }
 
@@ -257,6 +293,9 @@ onMounted(load)
 <style scoped>
 /* 全局骨架 / 卡片 / 表格 / 空状态 / 语义文字由 theme.css 统一提供，本页只保留特有结构 */
 .todo { min-width: 0; }
+.todo-edit { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.todo-edit-btn { background: none; border: 0; color: var(--c-text-2); cursor: pointer; font-size: 12px; padding: 4px 6px; }
+.todo-edit-btn:hover { color: var(--c-primary); }
 
 /* 页身份 */
 .todo-head { max-width: 720px; margin-bottom: 18px; }

@@ -35,6 +35,18 @@
       <n-button type="primary" :loading="saving" :disabled="saving" @click="add">保存</n-button>
     </div>
 
+    <!-- 编辑已有流水：金额 / 分类 / 日期录错时不必删了重建 -->
+    <div v-if="editingTxn.id" class="led-add led-edit">
+      <span class="led-add-kicker">编辑流水</span>
+      <n-date-picker v-model:value="editingTxn.date" type="date" clearable placeholder="日期" style="width:160px" />
+      <n-select v-model:value="editingTxn.direction" :options="directionOptions" style="width:110px" />
+      <n-input v-model:value="editingTxn.category" placeholder="分类" style="width:150px" />
+      <n-input-number v-model:value="editingTxn.amount" :min="0" placeholder="金额" style="width:130px" />
+      <n-input v-model:value="editingTxn.note" placeholder="备注（可选）" style="width:170px" />
+      <n-button type="primary" :loading="saving" :disabled="saving" @click="updateTxn">保存</n-button>
+      <n-button :disabled="saving" @click="cancelEditTxn">取消</n-button>
+    </div>
+
     <!-- 本月三数：收入 / 支出 / 净额 -->
     <div class="led-stats">
       <StatCard tone="success">
@@ -59,7 +71,7 @@
         </div>
         <div class="export-row">
           <n-button size="small" :disabled="!filteredRows.length || saving" @click="exportCsv">导出为表格文件</n-button>
-          <span class="muted led-hint">导出当前搜索结果为 CSV，可用 Excel / WPS 打开。</span>
+          <span class="muted led-hint">导出当前搜索结果为 CSV，可用 Excel / WPS 打开。金额打码只影响屏幕显示，导出为明文，请妥善保管。</span>
         </div>
       </SectionCard>
 
@@ -91,6 +103,15 @@
         <n-input-number v-model:value="newPending.est_amount" placeholder="预估金额" :min="0" />
         <n-input v-model:value="newPending.condition" placeholder="到账条件（可选）" style="width:180px" />
         <n-button type="primary" :disabled="saving" @click="addPending">添加</n-button>
+      </div>
+      <!-- 编辑已有的待收项：金额待确认 / 录错时不必删了重建 -->
+      <div v-if="editingPending.id" class="row-add ledger-row edit-pending">
+        <span class="muted">编辑待收项</span>
+        <n-input v-model:value="editingPending.type" placeholder="项目" style="width:190px" />
+        <n-input-number v-model:value="editingPending.est_amount" placeholder="预估金额" :min="0" />
+        <n-input v-model:value="editingPending.condition" placeholder="到账条件（可选）" style="width:180px" />
+        <n-button type="primary" :disabled="saving" @click="updatePending">保存</n-button>
+        <n-button :disabled="saving" @click="cancelEditPending">取消</n-button>
       </div>
     </SectionCard>
 
@@ -128,6 +149,7 @@
 import { ref, reactive, computed, h, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useMessage, NButton } from 'naive-ui'
 import { supabase } from '../lib/supabase'
+import { subscribeFlowChange } from '../lib/flowChannel'
 import { useAuthStore } from '../stores/auth'
 import { useAppStore } from '../stores/app'
 import { buildProjection } from '../composables/useProjection'
@@ -138,7 +160,10 @@ import {
 } from '../lib/labels'
 import { toLocalISODate, todayISO, monthRangeISO } from '../lib/date'
 import { validateTransaction, validatePendingIncome, round2 } from '../lib/validation'
-import { readPref, writePref, readStartBalance, writeStartBalance } from '../lib/prefs'
+import {
+  readPref, writePref, readStartBalance, writeStartBalance,
+  readCurrentBalance, writeCurrentBalance
+} from '../lib/prefs'
 import { DEFAULT_TOLERANCE, normalizeTolerance, findUnmatchedEvents } from '../lib/reconcile'
 import { inferCategory, normalizeCategory } from '../lib/aiDraft'
 import { habitOptions, learnFromRows, recordUsage } from '../lib/categoryHabits'
@@ -162,6 +187,31 @@ watch(() => form.note, (v) => {
   }
 })
 const newPending = reactive({ type: '', est_amount: 0, condition: '' })
+// 待收项行内编辑：金额待确认 / 录错时不必删了重建（修复 est_amount 为空的死数据）
+const editingPending = reactive({ id: null, type: '', est_amount: 0, condition: '' })
+function startEditPending(row) {
+  Object.assign(editingPending, {
+    id: row.id,
+    type: row.type || '',
+    est_amount: Number(row.est_amount) || 0,
+    condition: row.condition || ''
+  })
+}
+function cancelEditPending() { editingPending.id = null }
+
+// 流水行内编辑
+const editingTxn = reactive({ id: null, date: null, direction: 'expense', category: '', amount: 0, note: '' })
+function startEditTxn(row) {
+  Object.assign(editingTxn, {
+    id: row.id,
+    date: row.txn_date ? new Date(`${row.txn_date}T00:00:00`).getTime() : null,
+    direction: row.direction || 'expense',
+    category: row.category || '',
+    amount: Number(row.amount) || 0,
+    note: row.note || ''
+  })
+}
+function cancelEditTxn() { editingTxn.id = null }
 const directionOptions = [
   { label: '支出', value: 'expense' },
   { label: '收入', value: 'income' }
@@ -196,6 +246,7 @@ const reconcileStart = ref(readStartBalance())
 const reconcileTolerance = ref(readPref('reconcileTolerance', DEFAULT_TOLERANCE))
 const tolerance = computed(() => normalizeTolerance(reconcileTolerance.value))
 const prefRevision = ref(0)
+let unsubFlow = null
 const onPrefChange = () => {
   prefRevision.value++
   // 另一个页面 / 标签页改了期初余额，这里同步，避免两处基准不一致
@@ -255,10 +306,15 @@ const columns = [
   { title: '来源', key: 'source', width: 100, render: (r) => SOURCE_LABEL[r.source] || r.source || '—' },
   { title: '备注', key: 'note', width: 160, render: (r) => r.note || '—' },
   {
-    title: '操作', key: 'action', width: 90,
-    render: (row) => h(NButton,
-      { size: 'small', quaternary: true, type: 'error', disabled: saving.value, onClick: () => del(row) },
-      { default: () => '删除' })
+    title: '操作', key: 'action', width: 140,
+    render: (row) => h('div', { class: 'ops' }, [
+      h(NButton,
+        { size: 'small', quaternary: true, disabled: saving.value, onClick: () => startEditTxn(row) },
+        { default: () => '编辑' }),
+      h(NButton,
+        { size: 'small', quaternary: true, type: 'error', disabled: saving.value, onClick: () => del(row) },
+        { default: () => '删除' })
+    ])
   }
 ]
 
@@ -284,6 +340,12 @@ const pendingColumns = [
     render: (row) => {
       const open = row.status === 'unreceived' || row.status === 'reviewing'
       const btns = []
+      if (row.status !== 'received') {
+        btns.push(h(NButton, {
+          size: 'small', quaternary: true, disabled: saving.value,
+          onClick: () => startEditPending(row)
+        }, { default: () => '编辑' }))
+      }
       if (open) {
         btns.push(h(NButton, {
           size: 'small', quaternary: true, type: 'primary', disabled: saving.value,
@@ -365,6 +427,9 @@ async function load() {
   // 复用已有查询结果导入历史分类习惯，不发额外请求
   learnFromRows(txnRes.data || [])
   pending.value = pendRes.data || []
+  // 同步推演引擎的已记流水与待收上下文：仪表盘 / 日历 / AI 劝导随之更新
+  // 同步失败不阻断账本渲染（预测会退回纯档案口径）
+  try { await app.reloadTransactions() } catch { /* noop */ }
 }
 
 async function add() {
@@ -394,6 +459,28 @@ async function add() {
   if (ok) message.success('已记录')
 }
 
+async function updateTxn() {
+  const row = rows.value.find((r) => r.id === editingTxn.id)
+  if (!row) return
+  const checked = validateTransaction({
+    txn_date: toLocalISODate(editingTxn.date),
+    direction: editingTxn.direction,
+    category: normalizeCategory(editingTxn.category, editingTxn.note, habitOptions()),
+    amount: editingTxn.amount,
+    note: editingTxn.note,
+    source: row.source || 'manual'
+  })
+  if (!checked.ok) return message.warning(checked.error)
+  const ok = await run(async () => {
+    const { error } = await supabase.from('transaction')
+      .update(checked.value).eq('id', row.id)
+    if (error) throw error
+    editingTxn.id = null
+    await load()
+  })
+  if (ok) message.success('已更新流水，推演与对账已同步重算')
+}
+
 async function del(row) {
   const ok = await run(async () => {
     const { error } = await supabase.from('transaction').delete().eq('id', row.id)
@@ -416,6 +503,22 @@ async function addPending() {
     await load()
   })
   if (ok) message.success('已添加待收项')
+}
+
+async function updatePending() {
+  const row = pending.value.find((p) => p.id === editingPending.id)
+  if (!row) return
+  // 复用同一校验层，status 显式保持当前值，避免绕过「到账」两步事务
+  const checked = validatePendingIncome({ ...editingPending, status: row.status })
+  if (!checked.ok) return message.warning(checked.error)
+  const ok = await run(async () => {
+    const { error } = await supabase.from('pending_income')
+      .update(checked.value).eq('id', row.id)
+    if (error) throw error
+    editingPending.id = null
+    await load()
+  })
+  if (ok) message.success('已更新待收项，可继续标记到账')
 }
 
 async function delPending(row) {
@@ -448,9 +551,14 @@ async function markReceived(row) {
   await auth.ensureReady()
   const uid = auth.userId
   if (!uid) return message.error('未登录')
+  // 金额待确认（null / 0）时不再静默校验失败：明确引导先补金额
+  const est = Number(row.est_amount)
+  if (!Number.isFinite(est) || est <= 0) {
+    return message.warning('这项还没有有效的预估金额，请先点「编辑」补上金额，再标记到账')
+  }
   const checked = validateTransaction({
     txn_date: todayISO(), direction: 'income', category: row.type,
-    amount: row.est_amount, note: row.condition || '待收收入到账', source: 'manual'
+    amount: est, note: row.condition || '待收收入到账', source: 'manual'
   })
   if (!checked.ok) return message.warning(checked.error)
   const ok = await run(async () => {
@@ -462,6 +570,17 @@ async function markReceived(row) {
     if (upErr) {
       await supabase.from('transaction').delete().eq('id', inserted.id)
       throw new Error(`状态更新失败，已撤销流水：${upErr.message}`)
+    }
+    // FR-11：到账后真实余额台账同步增加，仪表盘「现在还剩」与台账一起更新
+    try {
+      const cur = readCurrentBalance().value
+      if (cur != null) {
+        writeCurrentBalance(round2(cur + checked.value.amount), {
+          reason: `待收「${row.type}」到账`
+        })
+      }
+    } catch {
+      // 余额台账更新失败不影响到账主流程（流水与状态已写入）
     }
     await load()
   })
@@ -475,11 +594,16 @@ watch(reconcileTolerance, (v) => writePref('reconcileTolerance', normalizeTolera
 onMounted(() => {
   window.addEventListener('paytrace:pref-changed', onPrefChange)
   window.addEventListener('storage', onPrefChange)
+  unsubFlow = subscribeFlowChange(() => {
+    app.reloadTransactions({ silent: true }).catch(() => {})
+    load()
+  })
   load()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('paytrace:pref-changed', onPrefChange)
   window.removeEventListener('storage', onPrefChange)
+  unsubFlow?.()
 })
 </script>
 

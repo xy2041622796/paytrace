@@ -72,10 +72,14 @@ export function validateProfile(input) {
   const city = String(input?.city || '').trim()
   if (!city) return { ok: false, error: '城市不能为空' }
   if (city.length > 60) return { ok: false, error: '城市最多 60 个字' }
-  return {
-    ok: true,
-    value: { city, hire_date: hireDate, pay_day: payDay, tax_threshold: round2(threshold) }
+  const value = { city, hire_date: hireDate, pay_day: payDay, tax_threshold: round2(threshold) }
+  // FR-02：公司作息（双休 / 单休）可选；未传时不覆盖库内已有值
+  if (input?.work_schedule != null && input.work_schedule !== '') {
+    const ws = String(input.work_schedule)
+    if (!['double', 'single'].includes(ws)) return { ok: false, error: '作息类型只能是 双休 / 单休' }
+    value.work_schedule = ws
   }
+  return { ok: true, value }
 }
 
 // 薪资与社保基数（四个基数必须是非负数字）

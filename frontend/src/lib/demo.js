@@ -238,6 +238,33 @@ function createAuth() {
 }
 
 // ------------------------------------------------------------
+// 演示客户端同样执行真实库的关键 CHECK 约束（0001_init.sql）：
+// 避免「演示能写进去、切真实 Supabase 就报错」的假成功。
+// 同时把中文方向 / 来源归一为库内枚举。
+// ------------------------------------------------------------
+const DIRECTION_ALIAS = { 收入: 'income', 支出: 'expense', income: 'income', expense: 'expense' }
+const SOURCE_ALIAS = { 手动: 'manual', ai: 'ai', manual: 'manual' }
+function normalizeAndValidateRow(table, p) {
+  const row = { ...p }
+  if (table === 'transaction') {
+    row.direction = DIRECTION_ALIAS[row.direction] || row.direction
+    row.source = SOURCE_ALIAS[row.source] || row.source
+    if (!['income', 'expense'].includes(row.direction)) return { error: 'direction 必须是 income / expense' }
+    if (!Number.isFinite(Number(row.amount)) || Number(row.amount) <= 0) return { error: 'amount 必须是正数' }
+    if (!['manual', 'ai'].includes(row.source)) return { error: 'source 必须是 manual / ai' }
+    if (!row.txn_date) return { error: 'txn_date 不能为空' }
+  }
+  if (table === 'pending_income') {
+    if (!String(row.type || '').trim()) return { error: '待收项目不能为空' }
+    if (!Number.isFinite(Number(row.est_amount)) || Number(row.est_amount) < 0) return { error: '预估金额必须是非负数' }
+  }
+  if (table === 'repayment_event' && (!row.due_date || !(Number(row.amount) > 0))) {
+    return { error: '还款日与正数金额必填' }
+  }
+  return { row }
+}
+
+// ------------------------------------------------------------
 // 查询构造器：只实现项目用到的链式方法，thenable 让 await / Promise.all 正常工作
 // ------------------------------------------------------------
 const looseEq = (a, b) => String(a ?? '') === String(b ?? '')
@@ -308,7 +335,13 @@ class DemoQuery {
 
     if (this._mode === 'insert') {
       const payloads = Array.isArray(this._payload) ? this._payload : [this._payload]
-      const inserted = payloads.map((p) => ({
+      const normalized = []
+      for (const p of payloads) {
+        const v = normalizeAndValidateRow(this.table, p)
+        if (v.error) return { data: null, error: { message: `[演示模式约束] ${v.error}` } }
+        normalized.push(v.row)
+      }
+      const inserted = normalized.map((p) => ({
         id: ++db._seq,
         created_at: nowISO(),
         ...p
@@ -394,18 +427,48 @@ function inferCategory(text) {
   return '其他'
 }
 
+// 本地日期加减（不碰 UTC，避免 GMT+8 把日期算错一天）
+function shiftDate(iso, delta) {
+  const d = new Date(`${iso}T00:00:00`)
+  d.setDate(d.getDate() + delta)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// 逐段解析相对日期；若本段没写日期，沿用前一段已解析出的日期
+function resolveChunkDate(chunk, today, inherited) {
+  if (/前天/.test(chunk)) return shiftDate(today, -2)
+  if (/昨天|昨日/.test(chunk)) return shiftDate(today, -1)
+  if (/今天|今日/.test(chunk)) return today
+  const md = chunk.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?/)
+  if (md) {
+    const year = new Date(`${today}T00:00:00`).getFullYear()
+    return `${year}-${String(Number(md[1])).padStart(2, '0')}-${String(Number(md[2])).padStart(2, '0')}`
+  }
+  const dm = chunk.match(/(\d{1,2})\s*[日号]/)
+  if (dm) {
+    const d = new Date(`${today}T00:00:00`)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(Number(dm[1])).padStart(2, '0')}`
+  }
+  return inherited
+}
+
 function parseDemoNote(text) {
   const today = localISO()
   const chunks = String(text || '').split(/[，,、;；。\n]+/).map((s) => s.trim()).filter(Boolean)
   const items = []
+  let inherited = today
   for (const chunk of chunks) {
-    const amounts = [...chunk.matchAll(/(\d+(?:\.\d+)?)\s*(?:元|块|块钱)?/g)]
+    const date = resolveChunkDate(chunk, today, inherited)
+    inherited = date
+    // 「3块5」先折成 3.5，再按数字取金额，避免取到角位 5
+    const normalized = chunk.replace(/(\d+)块(\d)(?!\d)/g, '$1.$2')
+    const amounts = [...normalized.matchAll(/(\d+(?:\.\d+)?)\s*(?:元|块|块钱)?/g)]
       .map((m) => Number(m[1])).filter((n) => Number.isFinite(n) && n > 0)
     if (!amounts.length) continue
     const isIncome = /工资|收入|报销|到账|收到|奖金|补贴|退款/.test(chunk)
     const category = isIncome ? (/工资/.test(chunk) ? '工资' : '其他收入') : inferCategory(chunk)
     items.push({
-      date: today,
+      date,
       direction: isIncome ? '收入' : '支出',
       category,
       amount: amounts[amounts.length - 1],
@@ -428,14 +491,25 @@ export async function demoAgnes(action, payload = {}) {
   if (action === 'parse_note') return parseDemoNote(payload.text)
   if (action === 'advise_purchase') {
     const ctx = payload.context || {}
+    const text = String(payload.text ?? '')
+    // 真正使用用户输入：提取想买的东西与价格，不再返回写死的模板文案
+    const amount = Number((text.match(/(\d+(?:\.\d+)?)\s*(?:元|块)?/) || [])[1]) || 0
+    const item = text.replace(/\d+(?:\.\d+)?\s*(?:元|块|块钱)?/g, '').replace(/想买|买个|一双|一个|该不该|能不能/g, '').trim() || '这件东西'
     const min = Number(ctx.monthMinBalance ?? 0)
-    const risky = min < 0 || Number(ctx.currentBalance ?? 0) < 200
+    const cur = Number(ctx.currentBalance ?? 0)
+    const upcoming = Array.isArray(ctx.upcomingRepayments) ? ctx.upcomingRepayments : []
+    const nearTotal = upcoming
+      .filter((r) => Number(r.daysFromToday) >= 0 && Number(r.daysFromToday) <= 7)
+      .reduce((s, r) => s + (Number(r.amount) || 0), 0)
+    const priceText = amount > 0 ? `${amount.toFixed(2)} 元` : '未标明金额'
+    const repayText = nearTotal > 0 ? `，未来 7 天内还有 ${nearTotal.toFixed(2)} 元待还` : ''
+    const risky = min < 0 || cur < 200 || (amount > 0 && cur - amount < 0)
     return {
       result: {
-        advice: risky ? '劝缓' : '中性',
+        advice: risky ? '暂时别买' : '可以买',
         reason: risky
-          ? `按当前档案推演，本月最低余额约为 ${min}，且 11.25 有一笔 3619.44 元白条待还，建议先留足还款资金。`
-          : '当前现金流足以覆盖本月固定开支与已录入还款，可按计划安排。',
+          ? `你想买的「${item}」约 ${priceText}；按当前档案推演，本月最低余额约 ${min.toFixed(2)} 元、当前可用约 ${cur.toFixed(2)} 元${repayText}。这笔支出会让现金安全垫更薄，建议先留足还款与生活开支。`
+          : `你想买的「${item}」约 ${priceText}；按当前档案推演，本月最低余额约 ${min.toFixed(2)} 元${repayText}，这笔支出在可承受范围内，可按计划安排。`,
         risk_level: risky ? '偏高' : '较低',
         disclaimer: '以上基于你本机的演示数据与推演假设，仅供参考，不构成理财建议，不承诺任何收益。'
       }

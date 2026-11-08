@@ -38,8 +38,38 @@ export const HOLIDAY_MAKEUP_2026 = new Set([
 // 2027 仅元旦（1/1 必放）保守内置；2027 其余安排未发布，按双休兜底（见 RK-06）
 export const HOLIDAY_LEGAL_EXTRA = new Set(['2027-01-01'])
 
+// ------------------------------------------------------------
+// 动态日历覆盖（FR-15）：生产环境由 Supabase holiday_calendar 表年度维护。
+// 表里有记录时优先用表判定，未覆盖的日期回落本地静态表；表为空则完全用静态表。
+// 这样运营补录 2027+ 数据无需发版，也不改变既有静态断言的行为。
+// ------------------------------------------------------------
+let dynamicCalendar = null
+
+export function setHolidayCalendar(rows) {
+  const list = Array.isArray(rows) ? rows : []
+  if (!list.length) {
+    dynamicCalendar = null
+    return
+  }
+  const map = new Map()
+  for (const r of list) {
+    const d = String(r?.holiday_date || '').slice(0, 10)
+    if (!d) continue
+    const t = String(r?.day_type || '')
+    map.set(d, t === 'makeup_workday' ? 'makeup'
+      : (t === 'legal_holiday' || t === 'rest') ? 'legal' : 'workday')
+  }
+  dynamicCalendar = map.size ? map : null
+}
+
+export function getHolidayCalendarInfo() {
+  return { loaded: !!dynamicCalendar, size: dynamicCalendar ? dynamicCalendar.size : 0 }
+}
+
 // 日历分类：返回 'legal'(法定节假日) | 'makeup'(调休补班) | 'weekend'(周六日) | 'workday'(普通工作日)
 export function classifyDay(dateStr) {
+  const dyn = dynamicCalendar?.get(dateStr)
+  if (dyn) return dyn
   if (HOLIDAY_LEGAL_2026.has(dateStr) || HOLIDAY_LEGAL_EXTRA.has(dateStr)) return 'legal'
   if (HOLIDAY_MAKEUP_2026.has(dateStr)) return 'makeup'
   const d = new Date(dateStr + 'T00:00:00')

@@ -7,6 +7,10 @@
       <p class="set-desc">工资、社保基数这类档案长期不变，设定一次持续生效。仅在调薪或基数调整时变更，每次变更会新增一个版本、保留历史，不会覆盖旧记录。所有数据仅本人可见。</p>
     </header>
 
+    <div v-if="loadError" class="pt-note" style="color:var(--c-danger,#e55);margin-bottom:12px">
+      档案加载失败：{{ loadError }}。当前显示的是默认占位值，请勿直接保存；请刷新页面重试。
+    </div>
+
     <div class="set-layout">
       <!-- 左：常驻分区导航（点击平滑滚动到对应分区，不触发路由） -->
       <aside class="set-rail">
@@ -37,7 +41,7 @@
                 <div class="arch-item"><span>所在城市</span><b>{{ archive.city }}</b></div>
                 <div class="arch-item"><span>入职日期</span><b>{{ formatDateCN(archive.hireDate) }}</b></div>
                 <div class="arch-item"><span>发薪日</span><b>每月 {{ archive.payDay }} 日（当天到账）</b></div>
-                <div class="arch-item"><span>工作制</span><b>固定双休</b></div>
+                <div class="arch-item"><span>工作制</span><b>{{ workScheduleLabel }}</b></div>
                 <div class="arch-item"><span>薪资阶段</span><b>{{ phaseLabel }}</b></div>
                 <div class="arch-item"><span>税前月薪</span><b>{{ formatMoney(app.salaryConfig?.pre_tax_salary) }}</b></div>
                 <div class="arch-item"><span>预计到手</span><b class="text-primary">{{ formatMoney(netNow.net) }}</b></div>
@@ -81,6 +85,9 @@
               </n-form-item>
               <n-form-item label="个税起征点（元）">
                 <n-input-number v-model:value="form.tax_threshold" :min="0" />
+              </n-form-item>
+              <n-form-item label="公司作息">
+                <n-select v-model:value="form.work_schedule" :options="workScheduleOptions" />
               </n-form-item>
             </n-form>
             <div class="form-actions">
@@ -226,7 +233,7 @@
               <n-input-number v-model:value="newRep.amount" placeholder="金额" :min="0" />
               <n-button type="primary" :disabled="saving" @click="addRep">添加</n-button>
             </div>
-            <div class="pt-note settings-note">还款按账单日当天扣款，不因周末或节假日顺延。</div>
+            <div class="pt-note settings-note">还款按账单日当天扣款、工资按每月发薪日当天到账，均不因周末或法定节假日顺延（用户决策，FR-16 的最终口径）；日历上的「休 / 假 / 补」仅用于阅读标注，不代表资金日期变动。若实际到账 / 扣款日与档案不一致，请直接在此调整还款日，或在「基础信息」修改发薪日。</div>
           </SectionCard>
         </section>
 
@@ -266,11 +273,17 @@
                 <n-date-picker v-model:value="newLia.next_repay_date" type="date" clearable placeholder="下次还款日" style="width:160px" />
                 <n-button type="primary" :disabled="saving" @click="addLia">添加</n-button>
               </div>
-              <div class="pt-note settings-note">
-                预估剩余期数：<b>{{ estRemainPeriods == null ? '—' : estRemainPeriods + ' 期' }}</b>
-                （估算值 = ceil(剩余本金 / 月供)，未计入利息与手续费，仅供参考；月供仅用于估算，不写入数据库）
+              <div class="row-add settings-row">
+                <span class="muted">每期月供（元）</span>
+                <n-input-number v-model:value="planMonthly" :min="0" style="width:140px" />
+                <n-button size="small" :disabled="saving" @click="generateRepayments">按负债生成未来 3 期账单</n-button>
               </div>
-              <div class="pt-note settings-note">负债仅用于总览，不会自动改写还款日历；请按需在上方「还款日历」录入实际扣款。</div>
+              <div class="pt-note settings-note">
+                新增负债的预估剩余期数：<b>{{ estRemainPeriods == null ? '—' : estRemainPeriods + ' 期' }}</b>；
+                清单里的「预计剩余期数」按上方每期月供自动推导（= ceil(剩余本金 / 月供)，未计利息与手续费，仅供参考）。
+                月供默认取「每月固定还款」偏好，可在此调整并保存在本机。
+              </div>
+              <div class="pt-note settings-note">「按负债生成未来 3 期账单」按每笔负债的下次还款日逐月生成还款事件，已存在的同日同额账单自动跳过；只新增、不改写已有数据。</div>
             </n-collapse-item>
           </n-collapse>
         </section>
@@ -293,7 +306,7 @@ import {
   formatDateCN, formatMoney
 } from '../lib/labels'
 import { toLocalISODate, isoDateToTimestamp, todayISO, isValidISODate } from '../lib/date'
-import { readPref, writePref } from '../lib/prefs'
+import { readPref, writePref, readSalaryYtd, writeSalaryYtd } from '../lib/prefs'
 import { parseInsuranceRules } from '../lib/insurance'
 import {
   validateProfile, validateSalary, validateExpense,
@@ -302,6 +315,8 @@ import {
 } from '../lib/validation'
 
 const message = useMessage()
+// 档案加载失败必须可见：否则页面会拿 USER_DEFAULTS 兜底值冒充实数据
+const loadError = ref('')
 const auth = useAuthStore()
 const app = useAppStore()
 const isMobile = useIsMobile()
@@ -322,8 +337,17 @@ const editLia = reactive({
 const form = reactive({
   city: USER_DEFAULTS.city,
   pay_day: USER_DEFAULTS.payDay,
-  tax_threshold: USER_DEFAULTS.taxThreshold
+  tax_threshold: USER_DEFAULTS.taxThreshold,
+  work_schedule: 'double'
 })
+const workScheduleOptions = [
+  { label: '双休（周六日休息）', value: 'double' },
+  { label: '单休（仅周日休息）', value: 'single' }
+]
+const WORK_SCHEDULE_LABEL = { double: '双休', single: '单休' }
+const workScheduleLabel = computed(() =>
+  WORK_SCHEDULE_LABEL[app.profile?.work_schedule] || '双休（默认）'
+)
 const sal = reactive({ pre_tax_salary: 0, ...SOCIAL_BASES })
 const newExp = reactive({ name: '', monthly_amount: 0, deduct_day: 1 })
 const newRep = reactive({ date: null, amount: 0 })
@@ -347,7 +371,7 @@ function defaultYtdRows() {
   }
   return rows
 }
-const ytdRows = ref(readPref('salaryYtd', defaultYtdRows()))
+const ytdRows = ref(readSalaryYtd(defaultYtdRows()))
 const savedYtdCount = computed(() =>
   (Array.isArray(ytdRows.value) ? ytdRows.value : []).filter((r) => Number(r.preTax) > 0).length
 )
@@ -473,7 +497,53 @@ function confirmWuhan() {
     : '表单字段均已填写，未覆盖任何值')
 }
 
-// 分期剩余期数：纯前端推导，monthlyPayment 不进入任何写库 payload
+// FR-05：月供与剩余期数推导、按负债派生还款账单
+const planMonthly = ref(
+  Number(readPref('liabilityPlanMonthly', 0)) || Number(readPref('recurringRepayment', 0)) || 0
+)
+const planPay = computed(() =>
+  Number(planMonthly.value) || Number(readPref('recurringRepayment', 0)) || 0
+)
+function remainPeriods(row) {
+  const pay = planPay.value
+  const principal = Number(row.remaining_principal) || 0
+  if (!(pay > 0) || !(principal > 0)) return '—'
+  return `${Math.ceil(principal / pay)} 期`
+}
+async function generateRepayments() {
+  const pay = planPay.value
+  if (!(pay > 0)) return message.warning('请先填写每期月供')
+  writePref('liabilityPlanMonthly', pay)
+  const list = (app.liabilities || []).filter(
+    (l) => l.next_repay_date && Number(l.remaining_principal) > 0 && l.type !== 'monthly_fixed'
+  )
+  if (!list.length) return message.warning('没有可生成账单的分期 / 白条负债')
+  const existing = new Set((app.repayments || []).map(
+    (r) => `${String(r.due_date || '').slice(0, 10)}:${Number(r.amount) || 0}`
+  ))
+  const rows = []
+  for (const l of list) {
+    const base = new Date(`${String(l.next_repay_date).slice(0, 10)}T00:00:00`)
+    if (!Number.isFinite(base.getTime())) continue
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(base)
+      d.setMonth(d.getMonth() + i)
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const key = `${iso}:${pay}`
+      if (existing.has(key)) continue
+      existing.add(key)
+      rows.push({ due_date: iso, amount: pay, status: 'pending' })
+    }
+  }
+  if (!rows.length) return message.info('未来 3 期账单都已存在，无需重复生成')
+  const ok = await run(async () => {
+    for (const r of rows) await app.addRepayment(r)
+    await app.load({ force: true })
+  })
+  if (ok) message.success(`已生成 ${rows.length} 期还款账单（已跳过重复）`)
+}
+
+// 新增负债表单的预估期数：纯前端推导，monthlyPayment 不进入任何写库 payload
 const estRemainPeriods = computed(() => {
   const pay = Number(newLia.monthlyPayment)
   const principal = Number(newLia.remaining_principal)
@@ -541,6 +611,7 @@ const liabilityColumns = [
   { title: '已还', key: 'paid', width: 110, render: (r) => formatMoney(r.paid) },
   { title: '剩余本金', key: 'remaining_principal', width: 120, render: (r) => formatMoney(r.remaining_principal) },
   { title: '手续费', key: 'fee', width: 100, render: (r) => formatMoney(r.fee) },
+  { title: '预计剩余期数', key: 'periods', width: 120, render: (r) => remainPeriods(r) },
   { title: '下次还款', key: 'next_repay_date', width: 120, render: (r) => formatDateCN(r.next_repay_date) },
   { title: '状态', key: 'status', width: 100, render: (r) => LIABILITY_STATUS_LABEL[r.status] || r.status },
   {
@@ -561,7 +632,8 @@ async function saveProfile() {
     city: form.city,
     hire_date: toLocalISODate(hireTs.value) || USER_DEFAULTS.hireDate,
     pay_day: form.pay_day,
-    tax_threshold: form.tax_threshold
+    tax_threshold: form.tax_threshold,
+    work_schedule: form.work_schedule
   })
   if (!checked.ok) return message.warning(checked.error)
   const ok = await run(() => app.saveProfile(checked.value))
@@ -718,7 +790,7 @@ function removeYtd(index) {
 function saveYtd() {
   const checked = validateSalaryYtd(ytdRows.value)
   if (!checked.ok) return message.warning(checked.error)
-  writePref('salaryYtd', checked.value)
+  writeSalaryYtd(checked.value)
   ytdRows.value = checked.value
   message.success(`已保存 ${checked.value.length} 个月，仪表盘将按真实累计重算个税`)
 }
@@ -728,6 +800,7 @@ function syncForm() {
   form.city = p?.city || USER_DEFAULTS.city
   form.pay_day = p?.pay_day ?? USER_DEFAULTS.payDay
   form.tax_threshold = p?.tax_threshold ?? USER_DEFAULTS.taxThreshold
+  form.work_schedule = p?.work_schedule === 'single' ? 'single' : 'double'
   hireTs.value = isoDateToTimestamp(hireDate.value)
 
   const sc = app.salaryConfig
@@ -739,10 +812,16 @@ function syncForm() {
 }
 
 async function loadData() {
-  await auth.ensureReady()
-  await app.load()
-  await app.loadSalaryHistory()
-  syncForm()
+  loadError.value = ''
+  try {
+    await auth.ensureReady()
+    await app.load()
+    await app.loadSalaryHistory()
+    syncForm()
+  } catch (e) {
+    loadError.value = e?.message || '未知错误'
+    message.error(loadError.value)
+  }
 }
 
 onMounted(loadData)

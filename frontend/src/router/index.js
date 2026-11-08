@@ -28,7 +28,18 @@ const routes = [
 
 const router = createRouter({
   history: createWebHashHistory(),
-  routes
+  routes,
+  // 切页回到顶部：避免从长页面底部跳转后停在中下部看不到页头
+  scrollBehavior: () => ({ top: 0 })
+})
+
+// 主内容区 .content 是独立滚动容器，vue-router 的 scrollBehavior 只作用于 window，
+// 必须在导航完成后手动归零，否则从长页底部切过来会停在中下部看不到页头。
+router.afterEach(() => {
+  requestAnimationFrame(() => {
+    const el = document.querySelector('.content')
+    if (el) el.scrollTop = 0
+  })
 })
 
 // 登录守卫：非公开路由必须有会话

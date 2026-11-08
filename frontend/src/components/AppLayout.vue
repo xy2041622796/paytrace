@@ -50,15 +50,7 @@
         </div>
 
         <router-link to="/check" class="side-link"><AppIcon name="download" :size="15" />导出全部数据</router-link>
-        <button class="side-link as-button" @click="showDeleteInfo = !showDeleteInfo">
-          <AppIcon name="shield" :size="15" />注销账户
-        </button>
-        <div v-if="showDeleteInfo" class="delete-info">
-          当前版本不提供账户删除。真正的账户注销需要删除 Supabase 的
-          <code>auth.users</code> 记录，该操作必须使用服务端管理密钥（service_role）
-          或服务端函数（Edge Function）调用管理端接口；前端使用的是公开 anon key 且受 RLS 限制，
-          无法执行，也不会假装已经删除。如需注销，请在 Supabase 控制台由管理员操作，或联系产品维护者。
-        </div>
+        <p class="side-note">账户注销：当前版本不提供自助注销。如需删除账户与数据，请在 Supabase 控制台操作或联系维护者。</p>
         <button class="logout" @click="logout"><AppIcon name="logout" :size="15" />退出登录</button>
       </div>
     </aside>
@@ -135,6 +127,7 @@
         <button class="pt-btn pt-btn--danger" @click="logout(); moreOpen = false"><AppIcon name="logout" :size="15" />退出登录</button>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -151,7 +144,6 @@ const route = useRoute()
 const auth = useAuthStore()
 const theme = useThemeStore()
 const privacyOn = ref(readPrivacyMask())
-const showDeleteInfo = ref(false)
 const moreOpen = ref(false)
 
 // 导航唯一数据源：分组、图标、短标签三处共用，避免桌面/移动两份清单漂移
@@ -371,6 +363,7 @@ onBeforeUnmount(() => {
 }
 .delete-info code { font-size: 11px; word-break: break-all; }
 .logout:hover { border-color: var(--c-danger); color: var(--c-danger); }
+.side-note { font-size: 11px; line-height: 1.6; color: var(--c-text-2); margin: 12px 2px 0; }
 
 .content {
   flex: 1; overflow-y: auto; padding: 30px 36px 56px; min-width: 0;

@@ -14,6 +14,12 @@
       </div>
     </header>
 
+    <div class="pt-note dc-export-note">
+      节假日日历：{{ holidayInfo.loaded ? `已加载运营表 ${holidayInfo.size} 条` : '未加载运营表，使用本地 2026 静态表' }}；
+      2027 及以后请在 Supabase <code>holiday_calendar</code> 表按年度维护，前端会自动覆盖静态表。<br />
+      金额打码只影响屏幕显示；「导出全量备份 / CSV」按合规要求导出真实明文数据，请妥善保管导出文件。
+    </div>
+
     <!-- 常驻错误条：加载 / 检查失败时明确显示，不只是一闪而过的提示 -->
     <div v-if="loadError" class="load-error card dc-alert" role="alert">
       <div class="load-error-text">
@@ -100,6 +106,27 @@
         </table>
       </div>
     </SectionCard>
+
+    <!-- 埋点事件：演示模式 / 写入降级时落在本机，便于验收 7 个事件是否触发 -->
+    <SectionCard title="埋点事件（本机）" desc="PRD 第十章 7 个事件；真实模式写入 analytics_event 表，此处仅展示降级到本机的记录" icon="chart">
+      <template #actions>
+        <n-button size="small" @click="refreshEvents">刷新</n-button>
+      </template>
+      <div class="pt-note">register_complete · param_saved · ai_note_created · repayment_reminder_sent · scenario_switched · cashflow_negative_viewed · holiday_adjusted</div>
+      <EmptyState v-if="!localEvents.length" icon="inbox">暂无本机埋点记录（真实模式下已写入数据库，不在此展示）。</EmptyState>
+      <div v-else class="log-table-wrap dc-table">
+        <table class="log-table">
+          <thead><tr><th>时间</th><th>事件</th><th>参数</th></tr></thead>
+          <tbody>
+            <tr v-for="(e, i) in localEvents.slice().reverse()" :key="i">
+              <td>{{ formatDateTimeCN(e.at) }}</td>
+              <td>{{ e.event }}</td>
+              <td>{{ JSON.stringify(e.payload || {}) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
   </div>
 </template>
 
@@ -112,12 +139,23 @@ import { useAppStore } from '../stores/app'
 import { isValidISODate, todayISO, monthRangeISO } from '../lib/date'
 import { formatDateTimeCN, formatMoney } from '../lib/labels'
 import { USER_DEFAULTS } from '../lib/constants'
-import { readPref, writePref, readStartBalance, writeStartBalance } from '../lib/prefs'
+import {
+  readPref, readStartBalance, writeStartBalance,
+  readRecurringRepayment, writeRecurringRepayment, readSalaryYtd, writeSalaryYtd
+} from '../lib/prefs'
 import { planBaselinePreset, baselineAlignment } from '../lib/baseline'
+import { readLocalEvents } from '../lib/analytics'
 
 const message = useMessage()
 const auth = useAuthStore()
 const app = useAppStore()
+const localEvents = ref(readLocalEvents())
+function refreshEvents() { localEvents.value = readLocalEvents() }
+// FR-15：运营维护的节假日表是否生效，直接读 app store（响应式）
+const holidayInfo = computed(() => {
+  const list = app.holidayCalendar || []
+  return { loaded: list.length > 0, size: list.length }
+})
 const issues = ref([])
 const checking = ref(false)
 const exporting = ref(false)
@@ -140,8 +178,8 @@ const acceptedLabel = (v) => (v === true ? '已采纳' : v === false ? '未采�
 function preparePreset() {
   presetPlan.value = planBaselinePreset({
     startBalance: readStartBalance(),
-    recurringRepayment: readPref('recurringRepayment', 0),
-    salaryYtd: readPref('salaryYtd', [])
+    recurringRepayment: readRecurringRepayment(),
+    salaryYtd: readSalaryYtd([])
   })
 }
 
@@ -149,8 +187,8 @@ function applyPreset() {
   const { values, applied } = presetPlan.value || {}
   if (!values || !applied?.length) return
   if (values.startBalance != null) writeStartBalance(values.startBalance)
-  if (values.recurringRepayment != null) writePref('recurringRepayment', values.recurringRepayment)
-  if (values.salaryYtd != null) writePref('salaryYtd', values.salaryYtd)
+  if (values.recurringRepayment != null) writeRecurringRepayment(values.recurringRepayment)
+  if (values.salaryYtd != null) writeSalaryYtd(values.salaryYtd)
   presetPlan.value = null
   message.success(`已写入 ${applied.length} 项本机参数`)
   runCheck()
@@ -240,7 +278,7 @@ async function runCheck() {
         }
       }
 
-      const ytd = readPref('salaryYtd', [])
+      const ytd = readSalaryYtd([])
       const ytdValid = (Array.isArray(ytd) ? ytd : []).filter((r) => Number(r.preTax) > 0)
       if (ytdValid.length) {
         add('info', '个税已按真实历史薪资校准',
@@ -275,12 +313,28 @@ async function runCheck() {
         }
       })
 
-      // ⑤ 流水
+      // ⑤ 流水（全量分页扫描，避免 .limit(1000) 与导出口径不一致 / 静默漏检）
       const now = new Date()
       const range = monthRangeISO(now.getFullYear(), now.getMonth() + 1)
+      const fetchAllTxn = async () => {
+        const rows = []
+        const PAGE = 1000
+        let from = 0
+        for (;;) {
+          const { data, error } = await supabase
+            .from('transaction').select('*').eq('user_id', uid)
+            .order('txn_date').range(from, from + PAGE - 1)
+          if (error) return { data: null, error }
+          const page = data || []
+          rows.push(...page)
+          if (page.length < PAGE) break
+          from += PAGE
+        }
+        return { data: rows, error: null }
+      }
       const [txnRes, pendRes] = await Promise.all([
-        supabase.from('transaction').select('*').eq('user_id', uid).limit(1000),
-        supabase.from('pending_income').select('*').eq('user_id', uid).limit(500)
+        fetchAllTxn(),
+        supabase.from('pending_income').select('*').eq('user_id', uid).order('created_at')
       ])
       if (txnRes.error || pendRes.error) {
         add('red', '读取流水失败', txnRes.error?.message || pendRes.error?.message)
@@ -295,7 +349,7 @@ async function runCheck() {
           if (t.txn_date > today) add('yellow', '存在未来日期流水', `分类「${t.category}」日期：${t.txn_date}`, '确认是否填错年份')
         })
         const thisMonth = txns.filter((t) => String(t.txn_date).startsWith(range.start.slice(0, 7)))
-        add('info', '本月流水', `${thisMonth.length} 条，列表查询上限 1000 条；月度汇总按当月全量独立查询，不受列表条数影响。`)
+        add('info', '本月流水', `${thisMonth.length} 条（已全量扫描，无条数截断）。`)
 
         pends = pendRes.data || []
         pends.forEach((x) => {
@@ -380,9 +434,9 @@ async function exportBackup() {
       AI交互日志: aiRes.data || [],
       本机偏好: {
         期初余额: readStartBalance(),
-        年内历史薪资: readPref('salaryYtd', []),
+        年内历史薪资: readSalaryYtd([]),
         应急备用金目标: readPref('cushionTarget', null),
-        每月固定还款: readPref('recurringRepayment', null),
+        每月固定还款: readRecurringRepayment(),
         对账容差: readPref('reconcileTolerance', 1)
       }
     }

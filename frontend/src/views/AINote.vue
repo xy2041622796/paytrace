@@ -98,6 +98,7 @@
 
         <EmptyState v-else icon="inbox">还没有草稿。输入一段大白话点「智能解析」，或点下方按钮手动记一笔。</EmptyState>
 
+        <p v-if="degradedHint" class="disclaimer" style="color:var(--c-warning,#f0a020)">{{ degradedHint }}，可点下方「手动添加一笔」补录。</p>
         <div class="below">
           <n-button size="small" @click="addBlank">手动添加一笔</n-button>
         </div>
@@ -137,12 +138,13 @@
 import { ref, computed } from 'vue'
 import { useMessage } from 'naive-ui'
 import { supabase, callAgnes } from '../lib/supabase'
+import { trackEvent } from '../lib/analytics'
 import { useAuthStore } from '../stores/auth'
 import { useAppStore } from '../stores/app'
 import { buildProjection } from '../composables/useProjection'
 import { formatMoney } from '../lib/labels'
 import { SAFETY_LINE } from '../lib/constants'
-import { readStartBalance, readRecurringRepayment } from '../lib/prefs'
+import { readPref, readStartBalance, readRecurringRepayment } from '../lib/prefs'
 import { useBusy } from '../composables/useBusy'
 import {
   makeBlankDraft, normalizeAiResult, isLowConfidence,
@@ -164,6 +166,8 @@ const parsing = ref(false)
 const advising = ref(false)
 const drafts = ref([])
 const advice = ref(null)
+// AI 拒答 / 低置信 / 上游不可用时的降级引导（不静默报「系统繁忙」）
+const degradedHint = ref('')
 const clearArmed = ref(false)
 const directionOptions = [
   { label: '支出', value: 'expense' },
@@ -206,6 +210,12 @@ async function parseNote() {
       text: noteText.value,
       categories: habitCategories()
     })
+    // 服务端降级（拒答 / 解析失败 / 条目全不合法）：引导手动补录，不把降级体当草稿
+    if (res?.degraded) {
+      degradedHint.value = res.result?.message || '未能识别，请手动补录'
+      return
+    }
+    degradedHint.value = ''
     // 带上原文与习惯：模型没给分类或给了别名时自动归一，用户不必逐条改
     const items = normalizeAiResult(res, noteText.value, habitOptions())
     if (!items.length) return message.warning('没解析出可用的账目，换个说法试试')
@@ -267,6 +277,9 @@ async function writeDrafts(onlyId = null) {
     }
     const done = new Set(writable.map((w) => w.id))
     drafts.value = drafts.value.filter((d) => !done.has(d.id))
+    // 同步推演引擎的已记流水：仪表盘 / 日历无需刷新即可反映这一笔
+    try { await app.reloadTransactions() } catch { /* 刷新失败不否定写入成功 */ }
+    trackEvent('ai_note_created', { count: writable.length, source: 'ai' }, `ai:${Date.now()}`)
     message.success(`已写入 ${writable.length} 笔流水`)
   })
 }
@@ -281,7 +294,8 @@ function buildFinancialContext() {
     startBalance: readStartBalance(),
     recurringRepayment: readRecurringRepayment(),
     year,
-    month
+    month,
+    actuals: app.transactions
   })
   const cf = p.cf
   const ym = `${year}-${String(month).padStart(2, '0')}`
@@ -313,6 +327,13 @@ function buildFinancialContext() {
     upcomingRepayments,
     topRisks: (cf.warnings || []).slice(0, 3)
       .map((w) => ({ title: w.title, detail: w.detail })),
+    // FR-13：月预算与待收收入，供模型判断「还有多少钱可花 / 补贴尚未到账」
+    monthlyBudget: Number(readPref('monthlyBudget', 0)) || 0,
+    pendingIncome: (app.pendingIncome || []).map((r) => ({
+      type: String(r.type || ''),
+      est_amount: r.est_amount ?? null,
+      status: String(r.status || 'unreceived')
+    })),
     safetyLine: SAFETY_LINE
   }
 }
@@ -329,6 +350,15 @@ async function advise() {
       text: buyText.value,
       context
     })
+    if (res?.degraded) {
+      advice.value = {
+        advice: '未能判断',
+        reason: res.result?.message || '暂时没能生成建议，请稍后再试',
+        risk_level: '未知',
+        disclaimer: '以上仅为消费提醒，不构成财务建议，也不承诺任何收益。'
+      }
+      return
+    }
     advice.value = res.result
   } catch (e) {
     message.error(e.message || '分析失败，请稍后重试')

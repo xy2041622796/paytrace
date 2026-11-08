@@ -248,8 +248,15 @@ export function computeCashflow(params) {
     startBalance = 0, year, month, payDay = 15,
     scenarios = [], mainLabel = null, expenses = [], repayments = [],
     liabilities = [], recurringRepayment = 0,
-    safetyLine = SAFETY_LINE
+    safetyLine = SAFETY_LINE,
+    // 已记流水的按日汇总（预算之外的实际发生额）。默认 null = 纯档案预测，
+    // 保持既有断言与月度对账口径不变；传入后历史日叠加实际收支，曲线随之更新。
+    extras = null
   } = params
+
+  const xIncome = extras?.income || {}
+  const xExpense = extras?.expense || {}
+  const xItems = extras?.items || {}
 
   const pad = (n) => String(n).padStart(2, '0')
   const ym = `${year}-${pad(month)}`
@@ -324,13 +331,19 @@ export function computeCashflow(params) {
     dayTypes.push(classifyDay(dateStr))
 
     const isPay = d === effPayDay
-    const incMain = isPay ? mainNet : 0
+    const actualIn = round2(Number(xIncome[d]) || 0)
+    const actualOut = round2(Number(xExpense[d]) || 0)
+    const incMain = round2((isPay ? mainNet : 0) + actualIn)
     const expAmt = expByDay[d] || 0
     const repayAmt = repayByDay[d] || 0
-    const outflow = round2(expAmt + repayAmt)
-    const commonDelta = -outflow
+    const outflow = round2(expAmt + repayAmt + actualOut)
+    const commonDelta = round2(actualIn - outflow)
 
     if (isPay) events.push({ day: d, type: 'pay', label: '发薪到账', amount: mainNet })
+    if (actualIn || actualOut) events.push({
+      day: d, type: 'actual', label: '已记流水', amount: round2(actualIn - actualOut),
+      items: xItems[d] || []
+    })
     // spread 标记：按日均摊的日常零花不是一笔真实账单，对账时不逐笔匹配。
     // label 保留拼接串供图表 tooltip 与既有断言使用；items 供日历逐笔展开。
     if (expAmt) events.push({
@@ -352,7 +365,8 @@ export function computeCashflow(params) {
     if (balanceMain < 0 && negativeFrom === null) negativeFrom = d
     daily.push({
       day: d, balance: balanceMain, outflow, income: incMain,
-      names: [expNames[d], repayAmt ? '还款扣款' : ''].filter(Boolean).join('、')
+      names: [expNames[d], repayAmt ? '还款扣款' : '',
+        (actualIn || actualOut) ? '已记流水' : ''].filter(Boolean).join('、')
     })
     dates.push(`${month}/${d}`)
   }
@@ -372,6 +386,25 @@ export function computeCashflow(params) {
   }
 }
 
+// 每月固定还款补齐（纯函数，单月推演与多月前瞻共用，避免两处漂移导致差一整笔月供）：
+// 当月还款日历里已有同额月供则跳过，否则补在发薪日。
+export function ensureRecurringRepayment(repayments, recurring, ym, payDay, daysInMonth) {
+  const list = (repayments || []).slice()
+  const recurringNum = Number(recurring) || 0
+  if (recurringNum <= 0) return list
+  const alreadyRecorded = list.some(
+    (r) => String(r.date || '').slice(0, 7) === ym &&
+      Math.abs(Number(r.amount) - recurringNum) < 0.01
+  )
+  if (!alreadyRecorded) {
+    list.push({
+      date: `${ym}-${String(Math.min(Number(payDay) || 15, daysInMonth)).padStart(2, '0')}`,
+      name: '每月固定还款', amount: recurringNum
+    })
+  }
+  return list
+}
+
 // 多月滚动预测：以上月结余作为下月期初，逐月复用日度引擎
 export function computeMultiMonth(params) {
   const {
@@ -379,7 +412,9 @@ export function computeMultiMonth(params) {
     salaryConfig = {}, expenses = [], repayments = [], recurringRepayment = 0,
     liabilities = [], rates = null, companyRates = null,
     hireDate = USER_DEFAULTS.hireDate, taxThreshold = DEFAULT_TAX_THRESHOLD,
-    ytdMonths = null
+    ytdMonths = null,
+    // 多月前瞻同样叠加已记流水：{ 'YYYY-MM': extras }
+    extrasByMonth = null
   } = params
 
   const pad = (n) => String(n).padStart(2, '0')
@@ -399,26 +434,18 @@ export function computeMultiMonth(params) {
       monthIndex, taxThreshold, ytdMonths: ytd, rates, companyRates
     }).net
 
-    const monthRepays = repayments
-      .filter((r) => String(r.date || '').slice(0, 7) === ym)
-      .map((r) => ({ date: r.date, name: '还款', amount: r.amount }))
-    const recurring = Number(recurringRepayment) || 0
-    // 固定月供只用于补充「尚未录入该笔账单」的月份。
-    // 当月还款日历里已有同额月供时若再追加，会重复扣款并让 forecast[0] 与当月推演不一致。
-    const alreadyRecorded = monthRepays.some(
-      (r) => Math.abs(Number(r.amount) - recurring) < 0.01
+    const monthRepays = ensureRecurringRepayment(
+      repayments
+        .filter((r) => String(r.date || '').slice(0, 7) === ym)
+        .map((r) => ({ date: r.date, name: '还款', amount: r.amount })),
+      recurringRepayment, ym, payDay, daysInMonth
     )
-    if (recurring > 0 && !alreadyRecorded) {
-      monthRepays.push({
-        date: `${ym}-${pad(Math.min(Number(payDay) || 15, daysInMonth))}`,
-        name: '每月固定还款', amount: recurring
-      })
-    }
 
     const cf = computeCashflow({
       startBalance: balance, year: y, month: m, payDay,
       scenarios: [{ label: '当前薪资', net }], mainLabel: '当前薪资',
-      expenses, repayments: monthRepays, liabilities, recurringRepayment
+      expenses, repayments: monthRepays, liabilities, recurringRepayment,
+      extras: extrasByMonth?.[ym] || null
     })
 
     const risky = cf.warnings.filter((w) => w.level === 'red' || w.level === 'orange')
