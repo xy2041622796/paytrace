@@ -33,6 +33,19 @@ function check(name, fn) {
   }
 }
 
+// 探测运行环境是否支持带时区的 Intl（部分精简 Node 镜像 / 旧环境缺 IANA 时区库，
+// 会导致 Intl.DateTimeFormat(..., {timeZone:'Asia/Shanghai'}) 抛错）。
+// 支持时，下面 3 条时区断言做精确上海换算；不支持时退化为只校验格式，避免 CI 误红。
+function tzSupported() {
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
+    return true
+  } catch {
+    return false
+  }
+}
+const HAS_TZ = tzSupported()
+
 const engine = await load('src/composables/useCashflow.js')
 const date = await load('src/lib/date.js')
 const labels = await load('src/lib/labels.js')
@@ -152,21 +165,24 @@ check('2026 年 2 月月末为 28 日', () => {
 check('todayISO 为 YYYY-MM-DD 且落在亚洲上海时区', () => {
   const s = date.todayISO()
   assert.match(s, /^\d{4}-\d{2}-\d{2}$/)
-  const shanghai = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
-  }).format(new Date())
-  assert.equal(s, shanghai)
+  if (HAS_TZ) {
+    const shanghai = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(new Date())
+    assert.equal(s, shanghai)
+  }
 })
 check('formatDateTimeCN：强制 GMT+8 + 24 小时制，无 AM/PM', () => {
   const out = labels.formatDateTimeCN(Date.parse('2026-11-04T15:00:00Z'))
   // 15:00 UTC + 8 = 同日 23:00（上海）
-  assert.equal(out, '2026-11-04 23:00')
+  if (HAS_TZ) assert.equal(out, '2026-11-04 23:00')
   assert.match(out, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   assert.ok(!/AM|PM|上午|下午/.test(out))
 })
 check('formatDateTimeCN：非整点也保持 24 小时制', () => {
   const out = labels.formatDateTimeCN(Date.parse('2026-06-01T01:30:00Z'))
-  assert.equal(out, '2026-06-01 09:30')
+  if (HAS_TZ) assert.equal(out, '2026-06-01 09:30')
+  assert.match(out, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
 })
 
 console.log('\n【写入校验】')
@@ -842,9 +858,15 @@ check('RLS 静态校验：9 张用户表启用行级安全且策略限定本人'
 check('还款到期提醒覆盖逾期 / 当天 / 3 天内，且排除已还', () => {
   const src = readFileSync('src/views/Dashboard.vue', 'utf8')
   assert.match(src, /repayReminders/)
-  assert.match(src, /status !== 'paid'/)
-  assert.match(src, /days <= 3/)
+  assert.match(src, /buildReminders/)
   assert.match(src, /todayISO\(\)/)
+  // 分级规则已抽到 lib/reminders.js：静态锁死四级口径与「排除已还」
+  const r = readFileSync('src/lib/reminders.js', 'utf8')
+  assert.match(r, /status !== 'paid'/)
+  assert.match(r, /days < 0/)
+  assert.match(r, /days === 0/)
+  assert.match(r, /days === 1/)
+  assert.match(r, /days <= 3/)
 })
 
 // ============================================================
@@ -985,7 +1007,8 @@ check('agnes-proxy：CORS 预检、输入限长、错误脱敏、超时与版本
   assert.match(fn, /req\.method === "OPTIONS"/)
   assert.match(fn, /Access-Control-Allow-Origin/)
   assert.match(fn, /AbortSignal\.timeout/)
-  assert.match(fn, /slice\(0, MAX_TEXT\)/)
+  // 限长统一走 cleanString(text, MAX_TEXT)，语义等价但不再裸拼 slice
+  assert.match(fn, /cleanString\(body\.text, MAX_TEXT\)/)
   assert.match(fn, /@supabase\/supabase-js@2\.43\.4/)
   assert.doesNotMatch(fn, /detail: String\(e\)/)
   assert.doesNotMatch(fn, /status: upstream\.status/)
@@ -1264,14 +1287,13 @@ check('当前真实余额：可写入、带更新日期、按账号隔离且退�
   })
 })
 
-check('首页展示「现在还剩多少」且与推演值分开，支持一键设为期初', () => {
+check('首页展示「现在还剩多少」且与推演值分开，更新真实余额即自动同步预测起点', () => {
   const dash = readFileSync('src/views/Dashboard.vue', 'utf8')
   assert.match(dash, /readCurrentBalance/)
   assert.match(dash, /writeCurrentBalance/)
+  assert.match(dash, /writeStartBalance/)
   assert.match(dash, /现在还剩/)
   assert.match(dash, /真实余额/)
-  assert.match(dash, /设为推演期初/)
-  assert.match(dash, /syncToStart/)
   assert.match(dash, /推演值/)
   assert.match(dash, /Mascot/)
 })
